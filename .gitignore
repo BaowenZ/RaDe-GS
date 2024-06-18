@@ -1,0 +1,14 @@
+*.pyc
+.vscode
+output*/
+build
+__pycache__
+tensorboard_3d
+screenshots
+debug/
+gaussian_renderer/__pycache__
+scene/__pycache__
+utils/__pycache__
+*.egg-info
+debug*
+dtu_eval/Offical_DTU_Dataset

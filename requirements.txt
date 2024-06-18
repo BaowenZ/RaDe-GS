@@ -1,0 +1,5 @@
+open3d
+trimesh
+scikit-image
+opencv-python
+plyfile
