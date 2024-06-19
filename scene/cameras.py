@@ -64,7 +64,7 @@ class Camera(nn.Module):
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
-
+        # the edge calculation is adopted from https://github.com/autonomousvision/gaussian-opacity-fields/blob/main/train.py
         with torch.no_grad():
             grad_img_left = torch.mean(torch.abs(self.original_image[:, 1:-1, 1:-1] - self.original_image[:, 1:-1, :-2]), 0)
             grad_img_right = torch.mean(torch.abs(self.original_image[:, 1:-1, 1:-1] - self.original_image[:, 1:-1, 2:]), 0)

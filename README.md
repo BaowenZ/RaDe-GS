@@ -50,6 +50,6 @@ We build this project based on [Gaussian Splatting](https://github.com/graphdeco
 
 We adopt the loss functions of [2D GS](https://github.com/hbb1/2d-gaussian-splatting) and use the preprocessed DTU dataset.
 
-We use the evalution code of [GOF](https://github.com/autonomousvision/gaussian-opacity-fields/tree/main).
+We adopt the densification strategy, evalution and decoupled appearance modeling form [GOF](https://github.com/autonomousvision/gaussian-opacity-fields/tree/main).
 
 We thank the authors of Gaussian Splatting, 2D GS, and GOF for their great works.

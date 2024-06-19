@@ -883,7 +883,7 @@ renderCUDA(
 			// Update gradients w.r.t. 2D mean position of the Gaussian
 			atomicAdd(&dL_dmean2D[global_id].x, (dL_dG * dG_ddelx + dL_ddepth * depth_plane.x) * ddelx_dx);
 			atomicAdd(&dL_dmean2D[global_id].y, (dL_dG * dG_ddely + dL_ddepth * depth_plane.y) * ddely_dy);
-			// new metric for densification, please see Densification section in our paper (https://arxiv.org/pdf/2404.10772.pdf) for more details.
+			// fork from GOF https://github.com/autonomousvision/gaussian-opacity-fields
 			const float abs_dL_dmean2D = abs(dL_dG * dG_ddelx * ddelx_dx) + abs(dL_dG * dG_ddely * ddely_dy);
             atomicAdd(&dL_dmean2D[global_id].z, abs_dL_dmean2D);
 			// Update gradients w.r.t. 2D covariance (2x2 matrix, symmetric)
