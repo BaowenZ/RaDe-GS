@@ -311,6 +311,7 @@ __global__ void computeCov2DCUDA(int P,
 		dL_dVrk = - glm::outerProduct(Vrk_inv * W_uvh, (Vrk_inv/clamp_vb) * (W_uvh * (-tmp) + W * glm::transpose(nJ_inv) * glm::vec3(dL_depth_plane.x * factor2, dL_depth_plane.y * factor2, 0)));
 	}
 	else{
+		dL_dVrk = glm::mat3(0,0,0,0,0,0,0,0,0);
 		glm::mat3 dL_dVrk_inv = glm::outerProduct(W_uvh, W_uvh * dL_dvb + W * nJ_inv_dL_dplane);
 		glm::vec3 dL_dv = (dL_dVrk_inv + glm::transpose(dL_dVrk_inv)) * eigenvector_min;;
 		for(int j =0;j<3;j++)

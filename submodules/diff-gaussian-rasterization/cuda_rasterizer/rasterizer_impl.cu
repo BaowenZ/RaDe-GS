@@ -191,8 +191,8 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 {
 	GeometryState geom;
 	obtain(chunk, geom.depths, P, 128);
-	obtain(chunk, geom.depths_plane, P * 2, 128);
-	obtain(chunk, geom.normals, P * 3, 128);
+	obtain(chunk, geom.depths_plane, P, 128); //previous versions wastes memory.
+	obtain(chunk, geom.normals, P, 128);
 	obtain(chunk, geom.clamped, P * 3, 128);
 	obtain(chunk, geom.internal_radii, P, 128);
 	obtain(chunk, geom.means2D, P, 128);
