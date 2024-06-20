@@ -3,3 +3,4 @@ trimesh
 scikit-image
 opencv-python
 plyfile
+tqdm
