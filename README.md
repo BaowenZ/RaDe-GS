@@ -47,7 +47,7 @@ python evaluate_dtu_mesh.py -s <path to DTU dataset> -m <output folder>
 
 # 4. Viewer
 Current viewer in this repository is very similar to the original Gaussian Splatting viewer (with small modifications for 3D filters).
-You can build use it in the same way as [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting).
+You can build and use it in the same way as [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting).
 
 
 # 5. Acknowledge
