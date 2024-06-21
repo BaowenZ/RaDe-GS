@@ -12,3 +12,4 @@ utils/__pycache__
 *.egg-info
 debug*
 dtu_eval/Offical_DTU_Dataset
+*.sh
