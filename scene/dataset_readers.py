@@ -39,10 +39,7 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
-    depth: np.array
     mask: np.array = None
-    intrinsics: np.array = None
-    extrinsics: np.array = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -149,35 +146,9 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         image_path = os.path.join(images_folder, os.path.basename(extr.name))
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
-        
-        # # read depth image
-        # depth_path = os.path.join(os.path.dirname(images_folder)+'/depths', image_name + ".png")
-        # # for Replica data, the depth scale is 4000
-        # depth = np.array(Image.open(depth_path)) / 4000.0
-        # read depth image
-        depth_path = os.path.join(os.path.dirname(images_folder)+'/depth_est', "00"+image_name + ".pfm")
-        confidence_path = os.path.join(os.path.dirname(images_folder)+'/confidence', "00"+image_name + ".pfm")
-        if os.path.exists(depth_path):
-            depth, _ = read_pfm(depth_path)
-            depth = depth[...,0]
-            depth = Image.fromarray(depth)
-            confidence, _ = read_pfm(confidence_path)
-            mask = (confidence>0.9).astype(np.uint8)*255
-            image = Image.fromarray(np.concatenate([np.asarray(image),mask],axis=-1), "RGBA")
-        else:
-            depth = None
-        # depth_mask_path = os.path.join(os.path.dirname(images_folder)+'/mask', "00"+image_name + "_final.png")
-        # if os.path.exists(depth_mask_path):
-        #     mask = cv2.imread(depth_mask_path,-1)
-        #     image = Image.fromarray(np.concatenate([np.asarray(image),mask[...,None]],axis=-1), "RGBA")
-        # for Replica data, the depth scale is 4000
-        intrinsic = np.array([[focal_length_x,0,width/2],[0,focal_length_y,height/2],[0,0,1]])
-        extrinsic = np.eye(4)
-        extrinsic[:3,:3] = qvec2rotmat(extr.qvec)
-        extrinsic[:3,3] = T
 
-        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, depth=depth, 
-                              image_path=image_path, image_name=image_name, width=width, height=height, intrinsics=intrinsic, extrinsics=extrinsic)
+        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,  
+                              image_path=image_path, image_name=image_name, width=width, height=height)
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -308,18 +279,17 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             FovY = fovy 
             FovX = fovx
 
-
             cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1], depth=None, mask=None))
+                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1], mask=None))
             
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, eval, extension=".png", gap = 1):
+def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
     test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
-    train_cam_infos = train_cam_infos[::gap]
+    train_cam_infos = train_cam_infos
     print("train num:", len(train_cam_infos))
     # if not eval:
     #     train_cam_infos.extend(test_cam_infos)

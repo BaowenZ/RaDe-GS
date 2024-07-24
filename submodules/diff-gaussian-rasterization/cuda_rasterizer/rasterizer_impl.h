@@ -30,12 +30,15 @@ namespace CudaRasterizer
 	{
 		size_t scan_size;
 		float* depths;
-		float2* depths_plane;
+		float* camera_planes;
+		float2* ray_planes;
+		float* ts;
 		float3* normals;
 		char* scanning_space;
 		bool* clamped;
 		int* internal_radii;
 		float2* means2D;
+		float* view_points;
 		float* cov3D;
 		float4* conic_opacity;
 		float* rgb;
@@ -62,10 +65,11 @@ namespace CudaRasterizer
 	{
 		uint2* ranges;
 		uint2* point_ranges;
-		// float* accum_alpha;
 		float* wd;
 		float* wd2;
+		float* accum_coord;
 		uint32_t* n_contrib;
+		float* normal_length;
 
 		static ImageState fromChunk(char*& chunk, size_t N);
 	};

@@ -13,3 +13,5 @@ utils/__pycache__
 debug*
 dtu_eval/Offical_DTU_Dataset
 *.sh
+submodules/diff-gaussian-rasterization-org
+snapshot_fw.dump

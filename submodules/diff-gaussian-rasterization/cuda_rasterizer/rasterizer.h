@@ -47,15 +47,21 @@ namespace CudaRasterizer
 			const float* projmatrix,
 			const float* cam_pos,
 			const float tan_fovx, float tan_fovy,
+			const float kernel_size,
 			const bool prefiltered,
 			float* out_color,
+			float* out_coord,
+			float* out_mcoord,
 			float* out_depth,
-			float* out_middepth,
+			float* out_mdepth,
 			float* out_alpha,
 			float* out_normal,
 			float* out_distortion,
 			int* radii = nullptr,
-			bool debug = false);
+			bool geo_reg = true,
+			bool require_depth = true,
+			bool debug = false
+			);
 
 		static void backward(
 			const int P, int D, int M, int R,
@@ -73,29 +79,33 @@ namespace CudaRasterizer
 			const float* projmatrix,
 			const float* campos,
 			const float tan_fovx, float tan_fovy,
+			const float kernel_size,
 			const int* radii,
+			const float* normalmap,
 			char* geom_buffer,
 			char* binning_buffer,
 			char* image_buffer,
 			const float* dL_dpix,
-			const float* dL_dpix_depth,
-			const float* dL_dpix_middepth,
+			const float* dL_dpix_coord,
+			const float* dL_dpix_mcoord,
 			const float* dL_dalphas,
 			const float* dL_dpixel_normals,
 			const float* dL_ddistortions,
 			float* dL_dmean2D,
+			float* dL_dview_points,
 			float* dL_dconic,
 			float* dL_dopacity,
 			float* dL_dcolor,
 			float* dL_ddepth,
-			float* dL_ddepth_plane,
+			float* dL_dcamera_planes,
 			float* dL_dnormals,
 			float* dL_dmean3D,
 			float* dL_dcov3D,
 			float* dL_dsh,
 			float* dL_dscale,
 			float* dL_drot,
-			bool debug);
+			bool geo_reg = true,
+			bool debug = false);
 		
 		static int integrate(
 			std::function<char* (size_t)> geometryBuffer,
@@ -131,6 +141,7 @@ namespace CudaRasterizer
 			float* out_color_integrated = nullptr,
 			float* out_coordinate2d = nullptr,
 			float* out_sdf = nullptr,
+			bool* condition = nullptr,
 			bool debug = false);
 	};
 	

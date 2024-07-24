@@ -51,12 +51,13 @@ class ModelParams(ParamGroup):
         self._model_path = ""
         self._images = "images"
         self._dataset = ""
-        self.w_mask = False
         self._resolution = -1
         self._white_background = False
         self.data_device = "cuda"
         self.eval = False
         self.use_decoupled_appearance = False
+        self.disable_filter3D = False
+        self.kernel_size = 0.0
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -69,7 +70,6 @@ class PipelineParams(ParamGroup):
         self.convert_SHs_python = False
         self.compute_cov3D_python = False
         self.debug = False
-        self.interval = 1
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):

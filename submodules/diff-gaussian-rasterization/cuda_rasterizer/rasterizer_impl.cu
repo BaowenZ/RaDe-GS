@@ -191,11 +191,14 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 {
 	GeometryState geom;
 	obtain(chunk, geom.depths, P, 128);
-	obtain(chunk, geom.depths_plane, P, 128); //previous versions wastes memory.
+	obtain(chunk, geom.camera_planes, P * 6, 128);
+	obtain(chunk, geom.ray_planes, P, 128);
+	obtain(chunk, geom.ts, P, 128);
 	obtain(chunk, geom.normals, P, 128);
 	obtain(chunk, geom.clamped, P * 3, 128);
 	obtain(chunk, geom.internal_radii, P, 128);
 	obtain(chunk, geom.means2D, P, 128);
+	obtain(chunk, geom.view_points, P * 3, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
 	obtain(chunk, geom.conic_opacity, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
@@ -227,6 +230,8 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	obtain(chunk, img.point_ranges, N, 128);
 	obtain(chunk, img.wd, N, 128);
 	obtain(chunk, img.wd2, N, 128);
+	obtain(chunk, img.accum_coord, N * 3, 128);
+	obtain(chunk, img.normal_length, N, 128);
 	return img;
 }
 
@@ -266,15 +271,21 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* projmatrix,
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
+	const float kernel_size,
 	const bool prefiltered,
 	float* out_color,
+	float* out_coord,
+	float* out_mcoord,
 	float* out_depth,
-	float* out_middepth,
+	float* out_mdepth,
 	float* out_alpha,
 	float* out_normal,
 	float* out_distortion,
 	int* radii,
-	bool debug)
+	bool geo_reg,
+	bool require_depth,
+	bool debug
+	)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
@@ -318,16 +329,21 @@ int CudaRasterizer::Rasterizer::forward(
 		width, height,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
+		kernel_size,
 		radii,
 		geomState.means2D,
+		(float3*)geomState.view_points,
 		geomState.depths,
-		geomState.depths_plane,
+		geomState.camera_planes,
+		geomState.ray_planes,
+		geomState.ts,
 		geomState.normals,
 		geomState.cov3D,
 		geomState.rgb,
 		geomState.conic_opacity,
 		tile_grid,
 		geomState.tiles_touched,
+		false,
 		prefiltered
 	), debug)
 
@@ -383,10 +399,12 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
+		geomState.view_points,
 		geomState.means2D,
 		feature_ptr,
-		geomState.depths,
-		geomState.depths_plane,
+		geomState.ts,
+		geomState.camera_planes,
+		geomState.ray_planes,
 		geomState.normals,
 		geomState.conic_opacity,
 		focal_x, focal_y,
@@ -394,12 +412,18 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_depth,
-		out_middepth,
+		out_coord,
+		out_mcoord,
 		out_normal,
+		out_depth,
+		out_mdepth,
 		out_distortion,
 		imgState.wd,
-		imgState.wd2), debug);
+		imgState.wd2,
+		imgState.accum_coord,
+		imgState.normal_length,
+		geo_reg,
+		require_depth), debug);
 
 	return num_rendered;
 }
@@ -422,28 +446,32 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* projmatrix,
 	const float* campos,
 	const float tan_fovx, float tan_fovy,
+	const float kernel_size,
 	const int* radii,
+	const float* normalmap,
 	char* geom_buffer,
 	char* binning_buffer,
 	char* img_buffer,
 	const float* dL_dpix,
-	const float* dL_dpix_depth,
-	const float* dL_dpix_middepth,
+	const float* dL_dpix_coord,
+	const float* dL_dpix_mcoord,
 	const float* dL_dalphas,
 	const float* dL_dpixel_normals,
 	const float* dL_ddistortions,
 	float* dL_dmean2D,
+	float* dL_dview_points,
 	float* dL_dconic,
 	float* dL_dopacity,
 	float* dL_dcolor,
 	float* dL_ddepth,
-	float* dL_ddepth_plane,
+	float* dL_dcamera_planes,
 	float* dL_dnormals,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
+	bool geo_reg,
 	bool debug)
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
@@ -473,30 +501,36 @@ void CudaRasterizer::Rasterizer::backward(
 		binningState.point_list,
 		width, height,
 		background,
+		geomState.view_points,
 		geomState.means2D,
 		geomState.conic_opacity,
 		color_ptr,
 		depth_ptr,
-		geomState.depths_plane,
+		geomState.camera_planes,
 		alphas,
 		geomState.normals,
 		imgState.wd,
 		imgState.wd2,
+		imgState.accum_coord,
+		imgState.normal_length,
 		imgState.n_contrib,
 		dL_dpix,
-		dL_dpix_depth,
-		dL_dpix_middepth,
+		dL_dpix_coord,
+		dL_dpix_mcoord,
 		dL_dalphas,
 		dL_dpixel_normals,
 		dL_ddistortions,
+		normalmap,
 		focal_x, focal_y,
+		(float3*)dL_dview_points,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
 		dL_dcolor,
 		dL_ddepth,
-		(float2*)dL_ddepth_plane,
-		(float3*)dL_dnormals), debug)
+		dL_dcamera_planes,
+		dL_dnormals,
+		geo_reg), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
@@ -515,14 +549,16 @@ void CudaRasterizer::Rasterizer::backward(
 		projmatrix,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
+		kernel_size,
 		(glm::vec3*)campos,
 		(float3*)dL_dmean2D,
 		dL_dconic,
+		(float3*)dL_dview_points,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
 		dL_ddepth,
-		(float2*)dL_ddepth_plane,
-		(float3*)dL_dnormals,
+		(float2*)dL_dcamera_planes,
+		dL_dnormals,
 		dL_dcov3D,
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
@@ -565,6 +601,7 @@ int CudaRasterizer::Rasterizer::integrate(
 	float* out_color_integrated,
 	float* out_coordinate2d,
 	float* out_sdf,
+	bool* condition,
 	bool debug)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -593,7 +630,7 @@ int CudaRasterizer::Rasterizer::integrate(
 	}
 
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
-	CHECK_CUDA(FORWARD::preprocess_full(
+	CHECK_CUDA(FORWARD::preprocess(
 		P, D, M,
 		means3D,
 		(glm::vec3*)scales,
@@ -609,19 +646,27 @@ int CudaRasterizer::Rasterizer::integrate(
 		width, height,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
+		kernel_size,
 		radii,
 		geomState.means2D,
+		(float3*)geomState.view_points,
 		geomState.depths,
-		geomState.depths_plane,
+		geomState.camera_planes,
+		geomState.ray_planes,
+		geomState.ts,
 		geomState.normals,
 		geomState.cov3D,
-		invraycov3Ds,
 		geomState.rgb,
 		geomState.conic_opacity,
 		tile_grid,
 		geomState.tiles_touched,
-		prefiltered
+		prefiltered,
+		true,
+		invraycov3Ds,
+		condition
 	), debug)
+
+	
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
@@ -756,7 +801,6 @@ int CudaRasterizer::Rasterizer::integrate(
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
 	const float* cov3Ds = cov3D_precomp != nullptr ? cov3D_precomp : geomState.cov3D;
-	const float2* depths_plane = geomState.depths_plane;
 	// const float* view2gaussian = view2gaussian_precomp;
 	CHECK_CUDA(FORWARD::integrate(
 		tile_grid, block,
@@ -770,7 +814,8 @@ int CudaRasterizer::Rasterizer::integrate(
 		pointState.points2D,
 		geomState.means2D,
 		feature_ptr,
-		depths_plane,
+		geomState.camera_planes,
+		geomState.ray_planes,
 		cov3Ds,
 		viewmatrix,
 		(float3*)points3D,
@@ -778,8 +823,9 @@ int CudaRasterizer::Rasterizer::integrate(
 		(float3*)scales,
 		invraycov3Ds,
 		pointState.depths,
-		geomState.depths,
+		geomState.ts,
 		geomState.conic_opacity,
+		condition,
 		accum_alpha,
 		imgState.n_contrib,
 		// imgState.center_depth,

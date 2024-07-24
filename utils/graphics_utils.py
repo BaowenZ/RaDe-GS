@@ -98,31 +98,33 @@ def depths_double_to_points(view, depthmap1, depthmap2):
     W, H = view.image_width, view.image_height
     fx = W / (2 * math.tan(view.FoVx / 2.))
     fy = H / (2 * math.tan(view.FoVy / 2.))
-    intrins = torch.tensor(
-        [[fx, 0., W/2.],
-        [0., fy, H/2.],
+    # intrins = torch.tensor(
+    #     [[fx, 0., W/2.],
+    #     [0., fy, H/2.],
+    #     [0., 0., 1.0]]
+    # ).float().cuda()
+    intrins_inv = torch.tensor(
+        [[1/fx, 0.,-W/(2 * fx)],
+        [0., 1/fy, -H/(2 * fy),],
         [0., 0., 1.0]]
     ).float().cuda()
     grid_x, grid_y = torch.meshgrid(torch.arange(W)+0.5, torch.arange(H)+0.5, indexing='xy')
-    points = torch.stack([grid_x, grid_y, torch.ones_like(grid_x)], dim=-1).reshape(-1, 3).float().cuda()
-    rays_d = points @ intrins.inverse().T
-    # rays_o = torch.zeros(3,dtype=torch.float32,device="cuda")
-    # rays_o = c2w[:3,3]
-    points1 = depthmap1.reshape(-1, 1) * rays_d
-    points2 = depthmap2.reshape(-1, 1) * rays_d
+    points = torch.stack([grid_x, grid_y, torch.ones_like(grid_x)], dim=0).reshape(3, -1).float().cuda()
+    rays_d = intrins_inv @ points
+    points1 = depthmap1.reshape(1,-1) * rays_d
+    points2 = depthmap2.reshape(1,-1) * rays_d
     return points1, points2
 
 
 
-def depth_double_to_normal(view, depth1, depth2):
-    points1, points2 = depths_double_to_points(view, depth1, depth2)
-    points = torch.stack([points1, points2],dim=0).reshape(2, *depth1.shape[1:], 3)
+def depth_double_to_normal(view, points1, points2):
+    points = torch.stack([points1, points2],dim=0)
     output = torch.zeros_like(points)
-    dx = points[:,2:, 1:-1] - points[:,:-2, 1:-1]
-    dy = points[:,1:-1, 2:] - points[:,1:-1, :-2]
-    normal_map = torch.nn.functional.normalize(torch.cross(dx, dy, dim=-1), dim=-1)
-    output[:,1:-1, 1:-1, :] = normal_map
-    return output, points
+    dx = points[...,2:, 1:-1] - points[...,:-2, 1:-1]
+    dy = points[...,1:-1, 2:] - points[...,1:-1, :-2]
+    normal_map = torch.nn.functional.normalize(torch.cross(dx, dy, dim=1), dim=1)
+    output[...,1:-1, 1:-1] = normal_map
+    return output
 
 def bilinear_sampler(img, coords, mask=False):
     """ Wrapper for grid_sample, uses pixel coordinates """
@@ -144,68 +146,60 @@ def bilinear_sampler(img, coords, mask=False):
 # project the reference point cloud into the source view, then project back
 #extrinsics here refers c2w
 def reproject_with_depth(depth_ref, intrinsics_ref, extrinsics_ref, depth_src, intrinsics_src, extrinsics_src):
-    batch, height, width = depth_ref.shape
-    
+    width, height = depth_ref.shape[1], depth_ref.shape[0]
     ## step1. project reference pixels to the source view
     # reference view x, y
-    y_ref, x_ref = torch.meshgrid(torch.arange(0, height).to(depth_ref.device), torch.arange(0, width).to(depth_ref.device))
-    x_ref = x_ref.unsqueeze(0).repeat(batch,  1, 1)
-    y_ref = y_ref.unsqueeze(0).repeat(batch,  1, 1)
-    x_ref, y_ref = x_ref.reshape(batch, -1), y_ref.reshape(batch, -1)
+    x_ref, y_ref = np.meshgrid(np.arange(0, width), np.arange(0, height))
+    x_ref, y_ref = x_ref.reshape([-1]), y_ref.reshape([-1])
     # reference 3D space
-
-    A = torch.inverse(intrinsics_ref)
-    B = torch.stack((x_ref, y_ref, torch.ones_like(x_ref).to(x_ref.device)), dim=1) * depth_ref.reshape(batch, 1, -1)
-    xyz_ref = torch.matmul(A, B)
-
+    xyz_ref = np.matmul(np.linalg.inv(intrinsics_ref),
+                        np.vstack((x_ref, y_ref, np.ones_like(x_ref))) * depth_ref.reshape([-1]))
     # source 3D space
-    xyz_src = torch.matmul(torch.matmul(torch.inverse(extrinsics_src), extrinsics_ref),
-                        torch.cat((xyz_ref, torch.ones_like(x_ref).to(x_ref.device).unsqueeze(1)), dim=1))[:, :3]
+    xyz_src = np.matmul(np.matmul(extrinsics_src, np.linalg.inv(extrinsics_ref)),
+                        np.vstack((xyz_ref, np.ones_like(x_ref))))[:3]
     # source view x, y
-    K_xyz_src = torch.matmul(intrinsics_src, xyz_src)
-    xy_src = K_xyz_src[:, :2] / K_xyz_src[:, 2:3]
+    K_xyz_src = np.matmul(intrinsics_src, xyz_src)
+    xy_src = K_xyz_src[:2] / K_xyz_src[2:3]
 
     ## step2. reproject the source view points with source view depth estimation
     # find the depth estimation of the source view
-    x_src = xy_src[:, 0].reshape([batch, height, width]).float()
-    y_src = xy_src[:, 1].reshape([batch, height, width]).float()
-
-    # print(x_src, y_src)
-    sampled_depth_src = bilinear_sampler(depth_src.view(batch, 1, height, width), torch.stack((x_src, y_src), dim=-1).view(batch, height, width, 2))
+    x_src = xy_src[0].reshape([height, width]).astype(np.float32)
+    y_src = xy_src[1].reshape([height, width]).astype(np.float32)
+    sampled_depth_src = cv2.remap(depth_src, x_src, y_src, interpolation=cv2.INTER_LINEAR)
+    # mask = sampled_depth_src > 0
 
     # source 3D space
     # NOTE that we should use sampled source-view depth_here to project back
-    xyz_src = torch.matmul(torch.inverse(intrinsics_src),
-                        torch.cat((xy_src, torch.ones_like(x_ref).to(x_ref.device).unsqueeze(1)), dim=1) * sampled_depth_src.reshape(batch, 1, -1))
+    xyz_src = np.matmul(np.linalg.inv(intrinsics_src),
+                        np.vstack((xy_src, np.ones_like(x_ref))) * sampled_depth_src.reshape([-1]))
     # reference 3D space
-    xyz_reprojected = torch.matmul(torch.matmul(torch.inverse(extrinsics_ref), extrinsics_src),
-                                torch.cat((xyz_src, torch.ones_like(x_ref).to(x_ref.device).unsqueeze(1)), dim=1))[:, :3]
+    xyz_reprojected = np.matmul(np.matmul(extrinsics_ref, np.linalg.inv(extrinsics_src)),
+                                np.vstack((xyz_src, np.ones_like(x_ref))))[:3]
     # source view x, y, depth
-    depth_reprojected = xyz_reprojected[:, 2].reshape([batch, height, width]).float()
-    K_xyz_reprojected = torch.matmul(intrinsics_ref, xyz_reprojected)
-    xy_reprojected = K_xyz_reprojected[:, :2] / K_xyz_reprojected[:, 2:3]
-    x_reprojected = xy_reprojected[:, 0].reshape([batch, height, width]).float()
-    y_reprojected = xy_reprojected[:, 1].reshape([batch, height, width]).float()
+    depth_reprojected = xyz_reprojected[2].reshape([height, width]).astype(np.float32)
+    K_xyz_reprojected = np.matmul(intrinsics_ref, xyz_reprojected)
+    xy_reprojected = K_xyz_reprojected[:2] / K_xyz_reprojected[2:3]
+    x_reprojected = xy_reprojected[0].reshape([height, width]).astype(np.float32)
+    y_reprojected = xy_reprojected[1].reshape([height, width]).astype(np.float32)
 
     return depth_reprojected, x_reprojected, y_reprojected, x_src, y_src
 
-def check_geometric_consistency(depth_ref, intrinsics_ref, extrinsics_ref, depth_src, intrinsics_src, extrinsics_src, thre1=1, thre2=0.01):
-    batch, height, width = depth_ref.shape
-    y_ref, x_ref = torch.meshgrid(torch.arange(0, height).to(depth_ref.device), torch.arange(0, width).to(depth_ref.device))
-    x_ref = x_ref.unsqueeze(0).repeat(batch,  1, 1)
-    y_ref = y_ref.unsqueeze(0).repeat(batch,  1, 1)
-    inputs = [depth_ref, intrinsics_ref, extrinsics_ref, depth_src, intrinsics_src, extrinsics_src]
-    outputs = reproject_with_depth(*inputs)
-    depth_reprojected, x2d_reprojected, y2d_reprojected, x2d_src, y2d_src = outputs
+
+
+def check_geometric_consistency(depth_ref, intrinsics_ref, extrinsics_ref, depth_src, intrinsics_src, extrinsics_src, thre1=0.5, thre2=0.01):
+    width, height = depth_ref.shape[1], depth_ref.shape[0]
+    x_ref, y_ref = np.meshgrid(np.arange(0, width), np.arange(0, height))
+    depth_reprojected, x2d_reprojected, y2d_reprojected, x2d_src, y2d_src = reproject_with_depth(depth_ref, intrinsics_ref, extrinsics_ref,
+                                                     depth_src, intrinsics_src, extrinsics_src)
     # check |p_reproj-p_1| < 1
-    dist = torch.sqrt((x2d_reprojected - x_ref) ** 2 + (y2d_reprojected - y_ref) ** 2)
+    dist = np.sqrt((x2d_reprojected - x_ref) ** 2 + (y2d_reprojected - y_ref) ** 2)
 
     # check |d_reproj-d_1| / d_1 < 0.01
-    depth_diff = torch.abs(depth_reprojected - depth_ref)
+    depth_diff = np.abs(depth_reprojected - depth_ref)
     relative_depth_diff = depth_diff / depth_ref
 
-    mask = torch.logical_and(dist < thre1, relative_depth_diff < thre2)
+    mask = np.logical_and(dist < thre1, relative_depth_diff < thre2)
+    # mask = dist < 0.2
     depth_reprojected[~mask] = 0
 
     return mask, depth_reprojected, x2d_src, y2d_src, relative_depth_diff
-

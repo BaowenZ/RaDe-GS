@@ -19,6 +19,7 @@
 #define NUM_WARPS (BLOCK_SIZE/32)
 #define NEAR_PLANE 0.2
 #define FAR_PLANE 100.0
+#define NORMALIZE_EPS 1.0E-12F
 
 #define DEPTH_OFFSET 6
 #define ALPHA_OFFSET 7
@@ -50,7 +51,7 @@ __device__ const float SH_C3[] = {
 };
 
 // __device__ const float kernel_size = 0.1;
-__device__ const float kernel_size = 0.0;
+// __device__ const float kernel_size = 0.0;
 
 __forceinline__ __device__ float ndc2Pix(float v, int S)
 {
