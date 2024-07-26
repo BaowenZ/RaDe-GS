@@ -74,7 +74,6 @@ def marching_tetrahedra_with_binary_search(model_path, name, iteration, views, g
     end_points, end_sdf = verts_list[0]
     end_scales = scale_list[0]
     end_points, end_sdf, end_scales = end_points.cuda(), end_sdf.cuda(), end_scales.cuda()
-    print(end_points.shape, end_scales.shape, end_sdf.shape)
     
     faces=faces_list[0].cpu().numpy()
     points = (end_points[:, 0, :] + end_points[:, 1, :]) / 2.

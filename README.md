@@ -11,9 +11,8 @@ Baowen Zhang, Chuan Fang, Rakesh Shrestha, Yixun Liang, Xiaoxiao Long, Ping Tan
 
 # Modifications
 
-1. In TSDF fusion,  we opt to use per-pixel cosine values for calculating depth (Eq. 14: $d=cos\theta\ t^*$). 
-2. During training, we use the inverse of affine approximation to transform intersections from ray space to camera space. These transformed points are then utilized to compute normal consistency loss.
-3. We have removed the depth distortion loss for training. Now, we only use normal consistency loss as geometry regularization. We believe future techniques will enhance performance even further.
+1. We change to calculate depth using per-pixel cosine values  (Eq. 14: $d=cos\theta\ t^*$). Additionally, an option is provided to directly render the camera space coordinate map. We utilize the inverse of affine approximation to transform intersections from ray space to camera space, and these transformed points are then used in computing normal consistency loss.
+2. The depth distortion loss has been eliminated from our training process. Currently, we rely solely on normal consistency loss for geometry regularization.  We believe future techniques will enhance performance even further.
 
 
 # 1. Installation
@@ -98,6 +97,7 @@ python train.py -s <path to COLMAP or NeRF Synthetic dataset> --eval
 python render.py -m <path to pre-trained model> -s <path to dataset>
 python metrics.py -m <path to trained model> # Compute error metrics on renderings
 ```
+Our model can directly render coordinate map for training, without the need to first render a depth map and then convert it. This feature can be activated by including `--use_coord_map` in the argument list of 'train.py'.
 
 # 4. Viewer
 Current viewer in this repository is very similar to the original Gaussian Splatting viewer (with small modifications for 3D filters).
@@ -107,10 +107,12 @@ You can build and use it in the same way as [Gaussian Splatting](https://github.
 # 5. Acknowledge
 We build this project based on [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting).
 
+We incorporate the filters proposed in [Mip-Splatting](https://github.com/autonomousvision/mip-splatting).
+
 We adopt the loss functions of [2D GS](https://github.com/hbb1/2d-gaussian-splatting) and use the preprocessed DTU dataset.
 
 We adopt the densification strategy, evalution and decoupled appearance modeling form [GOF](https://github.com/autonomousvision/gaussian-opacity-fields/tree/main)  and use the preprocessed TNT dataset.
 
 The evaluation scripts for the DTU and Tanks and Temples datasets are sourced from [DTUeval-python](https://github.com/jzhangbs/DTUeval-python) and [TanksAndTemples](https://github.com/isl-org/TanksAndTemples/tree/master/python_toolbox/evaluation), respectively.
 
-We thank the authors of Gaussian Splatting, 2D GS, GOF， and the repos for their great works.
+We thank the authors of Gaussian Splatting, Mip-Splatting, 2D GS, GOF， and the repos for their great works.

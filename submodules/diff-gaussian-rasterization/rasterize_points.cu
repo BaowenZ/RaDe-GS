@@ -152,6 +152,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const torch::Tensor& dL_dout_color,
 	const torch::Tensor& dL_dout_coord,
 	const torch::Tensor& dL_dout_mcoord,
+	const torch::Tensor& dL_dout_depth,
+	const torch::Tensor& dL_dout_mdepth,
 	const torch::Tensor& dL_dout_alpha,
 	const torch::Tensor& dL_dout_normal,
 	const torch::Tensor& dL_dout_distortion,
@@ -165,6 +167,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& imageBuffer,
 	const torch::Tensor& alphas,
 	const bool geo_reg,
+	const bool require_depth,
 	const bool debug) 
 {
   const int P = means3D.size(0);
@@ -181,8 +184,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   torch::Tensor dL_dview_points = torch::zeros({P, 3}, means3D.options());
   torch::Tensor dL_dmeans2D = torch::zeros({P, 3}, means3D.options());
   torch::Tensor dL_dcolors = torch::zeros({P, NUM_CHANNELS}, means3D.options());
-  torch::Tensor dL_ddepths = torch::zeros({P, 1}, means3D.options());
-  torch::Tensor dL_ddepths_plane = torch::zeros({P, 6}, means3D.options());
+  torch::Tensor dL_dts = torch::zeros({P, 1}, means3D.options());
+  torch::Tensor dL_dcamera_planes = torch::zeros({P, 6}, means3D.options());
+  torch::Tensor dL_dray_planes = torch::zeros({P, 2}, means3D.options());
   torch::Tensor dL_dnormals = torch::zeros({P, 3}, means3D.options());
   torch::Tensor dL_dconic = torch::zeros({P, 2, 2}, means3D.options());
   torch::Tensor dL_dopacity = torch::zeros({P, 1}, means3D.options());
@@ -218,6 +222,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  dL_dout_color.contiguous().data<float>(),
 	  dL_dout_coord.contiguous().data<float>(),
 	  dL_dout_mcoord.contiguous().data<float>(),
+	  dL_dout_depth.contiguous().data<float>(),
+	  dL_dout_mdepth.contiguous().data<float>(),
 	  dL_dout_alpha.contiguous().data<float>(),
 	  dL_dout_normal.contiguous().data<float>(),
 	  dL_dout_distortion.contiguous().data<float>(),
@@ -226,8 +232,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  dL_dconic.contiguous().data<float>(),  
 	  dL_dopacity.contiguous().data<float>(),
 	  dL_dcolors.contiguous().data<float>(),
-	  dL_ddepths.contiguous().data<float>(),
-	  dL_ddepths_plane.contiguous().data<float>(),
+	  dL_dts.contiguous().data<float>(),
+	  dL_dcamera_planes.contiguous().data<float>(),
+	  dL_dray_planes.contiguous().data<float>(),
 	  dL_dnormals.contiguous().data<float>(),
 	  dL_dmeans3D.contiguous().data<float>(),
 	  dL_dcov3D.contiguous().data<float>(),
@@ -235,6 +242,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  dL_dscales.contiguous().data<float>(),
 	  dL_drotations.contiguous().data<float>(),
 	  geo_reg,
+	  require_depth,
 	  debug);
   }
 

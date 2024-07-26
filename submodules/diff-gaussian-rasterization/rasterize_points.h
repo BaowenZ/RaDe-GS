@@ -56,8 +56,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const float tan_fovy,
 	const float kernel_size,
     const torch::Tensor& dL_dout_color,
+	const torch::Tensor& dL_dout_coord,
+	const torch::Tensor& dL_dout_mcoord,
 	const torch::Tensor& dL_dout_depth,
-	const torch::Tensor& dL_dout_middepth,
+	const torch::Tensor& dL_dout_mdepth,
 	const torch::Tensor& dL_dout_alpha,
 	const torch::Tensor& dL_dout_normal,
 	const torch::Tensor& dL_dout_distortion,
@@ -71,6 +73,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& imageBuffer,
 	const torch::Tensor& alpha,
 	const bool geo_reg,
+	const bool require_depth,
 	const bool debug);
 		
 torch::Tensor markVisible(

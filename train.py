@@ -20,7 +20,7 @@ from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
-from utils.graphics_utils import depth_double_to_normal
+from utils.graphics_utils import point_double_to_normal, depth_double_to_normal
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 try:
@@ -82,6 +82,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     viewpoint_stack = None
     ema_loss_for_log, ema_depth_loss_for_log, ema_mask_loss_for_log, ema_normal_loss_for_log = 0.0, 0.0, 0.0, 0.0
+    require_depth = not dataset.use_coord_map
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     for iteration in range(first_iter, opt.iterations + 1):        
@@ -118,9 +119,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             pipe.debug = True
 
         reg_kick_on = iteration >= opt.regularization_from_iter
-
-        # Sine expected depth and median depth are not utilized in training, so their backpropagation is not currently implemented. We plan to implement this in the future.
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, geo_reg=reg_kick_on, require_depth= False)
+        
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, geo_reg=reg_kick_on, require_depth = require_depth)
         rendered_image: torch.Tensor
         rendered_image, viewspace_point_tensor, visibility_filter, radii = (
                                                                     render_pkg["render"], 
@@ -136,11 +136,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         
         if reg_kick_on:
-            rendered_expected_coord: torch.Tensor = render_pkg["expected_coord"]
-            rendered_median_coord: torch.Tensor = render_pkg["median_coord"]
-            rendered_normal: torch.Tensor = render_pkg["normal"]
             lambda_depth_normal = opt.lambda_depth_normal
-            depth_middepth_normal = depth_double_to_normal(viewpoint_cam, rendered_expected_coord, rendered_median_coord)
+            if require_depth:
+                rendered_expected_depth: torch.Tensor = render_pkg["expected_depth"]
+                rendered_median_depth: torch.Tensor = render_pkg["median_depth"]
+                rendered_normal: torch.Tensor = render_pkg["normal"]
+                depth_middepth_normal = depth_double_to_normal(viewpoint_cam, rendered_expected_depth, rendered_median_depth)
+            else:
+                rendered_expected_coord: torch.Tensor = render_pkg["expected_coord"]
+                rendered_median_coord: torch.Tensor = render_pkg["median_coord"]
+                rendered_normal: torch.Tensor = render_pkg["normal"]
+                depth_middepth_normal = point_double_to_normal(viewpoint_cam, rendered_expected_coord, rendered_median_coord)
             depth_ratio = 0.6
             normal_error_map = (1 - (rendered_normal.unsqueeze(0) * depth_middepth_normal).sum(dim=1))
             depth_normal_loss = (1-depth_ratio) * normal_error_map[0].mean() + depth_ratio * normal_error_map[1].mean()

@@ -76,7 +76,7 @@ __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const 
 // Forward version of 2D covariance matrix computation
 template<bool INTE = false>
 __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, float tan_fovx, float tan_fovy, float kernel_size, const float* cov3D, const float* viewmatrix, 
-							float* cov2D, float* output_plane, float3* output_normal, float2* ray_plane, float& coef, float* invraycov3Ds = nullptr)
+							float* cov2D, float* camera_plane, float3* output_normal, float2* ray_plane, float& coef, float* invraycov3Ds = nullptr)
 {
 	// The following models the steps outlined by equations 29
 	// and 31 in "EWA Splatting" (Zwicker et al., 2002). 
@@ -169,7 +169,7 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 	if(isnan(uvh_mn.x))
 	{
 		for(int ch = 0; ch < 6; ch++)
-			output_plane[ch] = 0;
+			camera_plane[ch] = 0;
 		*output_normal = {0,0,0};
 		*ray_plane = {0,0};
 	}
@@ -207,7 +207,6 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 			}
 			else
 			{
-				// update in the future (maybe torromow)
 				glm::mat3 T2 = W * nJ;
 				glm::mat3 cov_ray = glm::transpose(T2) * Vrk_inv * T2;
 				glm::mat3 cov_eigen_vector;
@@ -244,22 +243,21 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 
 
 		float vbn = glm::dot(uvh_mn, uvh);
-		// float factor = t.z / (u2+v2+1);
 		float factor_normal = l / (u2+v2+1);
 		glm::vec3 plane = nJ_inv * (uvh_mn/max(vbn,0.0000001f));
 		float nl = u2+v2+1;
-		glm::vec2 ray_depth_plane0 = {(-(v2 + 1)*t.z+plane[0]*t.x)/nl/focal_x, (uv*t.z+plane[1]*t.x)/nl/focal_y};
-		glm::vec2 ray_depth_plane1 = {(uv*t.z+plane[0]*t.y)/nl/focal_x, (-(u2 + 1)*t.z+plane[1]*t.y)/nl/focal_y};
-		glm::vec2 ray_depth_plane2 = {(t.x+plane[0]*t.z)/nl/focal_x, (t.y+plane[1]*t.z)/nl/focal_y};
+		glm::vec2 camera_plane_x = {(-(v2 + 1)*t.z+plane[0]*t.x)/nl/focal_x, (uv*t.z+plane[1]*t.x)/nl/focal_y};
+		glm::vec2 camera_plane_y = {(uv*t.z+plane[0]*t.y)/nl/focal_x, (-(u2 + 1)*t.z+plane[1]*t.y)/nl/focal_y};
+		glm::vec2 camera_plane_z = {(t.x+plane[0]*t.z)/nl/focal_x, (t.y+plane[1]*t.z)/nl/focal_y};
 
 		*ray_plane = {plane[0]*l/nl/focal_x, plane[1]*l/nl/focal_y};
 
-		output_plane[0] = ray_depth_plane0.x;
-		output_plane[1] = ray_depth_plane0.y;
-		output_plane[2] = ray_depth_plane1.x;
-		output_plane[3] = ray_depth_plane1.y;
-		output_plane[4] = ray_depth_plane2.x;
-		output_plane[5] = ray_depth_plane2.y;
+		camera_plane[0] = camera_plane_x.x;
+		camera_plane[1] = camera_plane_x.y;
+		camera_plane[2] = camera_plane_y.x;
+		camera_plane[3] = camera_plane_y.y;
+		camera_plane[4] = camera_plane_z.x;
+		camera_plane[5] = camera_plane_z.y;
 
 
 		glm::vec3 ray_normal_vector = {-plane[0]*factor_normal, -plane[1]*factor_normal, -1};
@@ -463,6 +461,7 @@ renderCUDA(
 	float* __restrict__ out_wd,
 	float* __restrict__ out_wd2,
 	float* __restrict__ accum_coord,
+	float* __restrict__ accum_depth,
 	float* __restrict__ normal_length
 	)
 {
@@ -657,14 +656,14 @@ renderCUDA(
 			{
 				for (int ch = 0; ch < 3; ch++)
 					out_coord[ch * H * W + pix_id] = Coord[ch] / weight;
-				out_distortion[pix_id] = depth_distortion / (weight * weight);
+				// out_distortion[pix_id] = depth_distortion / (weight * weight);
 				len_normal = sqrt(Normal[0]*Normal[0]+Normal[1]*Normal[1]+Normal[2]*Normal[2]);
 			}
 			else
 			{
 				for (int ch = 0; ch < 3; ch++)
 					out_coord[ch * H * W + pix_id] = 0;
-				out_distortion[pix_id] = 0;
+				// out_distortion[pix_id] = 0;
 				len_normal = 1;
 			}
 			for (int ch = 0; ch < 3; ch++)
@@ -678,8 +677,10 @@ renderCUDA(
 				out_normal[ch * H * W + pix_id] = Normal[ch]/len_normal;
 			if constexpr (DEPTH)
 			{
+				float depth_ln = Depth/ln;
+				accum_depth[pix_id] = depth_ln;
 				if(last_contributor)
-					out_depth[pix_id] = Depth/ln/weight;
+					out_depth[pix_id] = depth_ln/weight;
 				else
 					out_depth[pix_id] = 0;
 				out_mdepth[pix_id] = mDepth/ln;
@@ -691,6 +692,7 @@ renderCUDA(
 	}
 }
 
+// the Bool inputs can be replaced by an enumeration variable for different functions.
 void FORWARD::render(
 	const dim3 grid, dim3 block,
 	const uint2* ranges,
@@ -718,6 +720,7 @@ void FORWARD::render(
 	float* out_wd,
 	float* out_wd2,
 	float* accum_coord,
+	float* accum_depth,
 	float* normal_length,
 	bool geo,
 	bool depth)
@@ -727,7 +730,7 @@ renderCUDA<NUM_CHANNELS, template_geo, template_depth> <<<grid, block>>> ( \
 	ranges, point_list, W, H, view_points, means2D, colors, ts, camera_planes, ray_planes, \
 	normals, conic_opacity, focal_x, focal_y, out_alpha, n_contrib, bg_color, out_color, \
 	out_coord, out_mcoord, out_normal, out_depth, out_mdepth, out_distortion, out_wd, out_wd2, \
-	accum_coord, normal_length)
+	accum_coord, accum_depth, normal_length)
 
 	if (geo && depth)
 		RENDER_CUDA_CALL(true, true);
@@ -738,96 +741,6 @@ renderCUDA<NUM_CHANNELS, template_geo, template_depth> <<<grid, block>>> ( \
 		
 #undef RENDER_CUDA_CALL
 }
-
-// void FORWARD::render(
-// 	const dim3 grid, dim3 block,
-// 	const uint2* ranges,
-// 	const uint32_t* point_list,
-// 	int W, int H,
-// 	const float* view_points,
-// 	const float2* means2D,
-// 	const float* colors,
-// 	const float* ts,
-// 	const float* camera_planes,
-// 	const float2* ray_planes,
-// 	const float3* normals,
-// 	const float4* conic_opacity,
-// 	const float focal_x, float focal_y,
-// 	float* out_alpha,
-// 	uint32_t* n_contrib,
-// 	const float* bg_color,
-// 	float* out_color,
-// 	float* out_coord,
-// 	float* out_mcoord,
-// 	float* out_normal,
-// 	float* out_depth,
-// 	float* out_mdepth,
-// 	float* out_distortion,
-// 	float* out_wd,
-// 	float* out_wd2,
-// 	float* accum_coord,
-// 	float* normal_length,
-// 	bool geo_reg)
-// {
-// 	if(geo_reg)
-// 		renderCUDA<NUM_CHANNELS, true, true> << <grid, block >> > (
-// 			ranges,
-// 			point_list,
-// 			W, H,
-// 			view_points,
-// 			means2D,
-// 			colors,
-// 			ts,
-// 			camera_planes,
-// 			ray_planes,
-// 			normals,
-// 			conic_opacity,
-// 			focal_x,
-// 			focal_y,
-// 			out_alpha,
-// 			n_contrib,
-// 			bg_color,
-// 			out_color,
-// 			out_coord,
-// 			out_mcoord,
-// 			out_normal,
-// 			out_depth,
-// 			out_mdepth,
-// 			out_distortion,
-// 			out_wd,
-// 			out_wd2,
-// 			accum_coord,
-// 			normal_length);
-// 	else
-// 		renderCUDA<NUM_CHANNELS, false, true> << <grid, block >> > (
-// 			ranges,
-// 			point_list,
-// 			W, H,
-// 			view_points,
-// 			means2D,
-// 			colors,
-// 			ts,
-// 			camera_planes,
-// 			ray_planes,
-// 			normals,
-// 			conic_opacity,
-// 			focal_x,
-// 			focal_y,
-// 			out_alpha,
-// 			n_contrib,
-// 			bg_color,
-// 			out_color,
-// 			out_coord,
-// 			out_mcoord,
-// 			out_normal,
-// 			out_depth,
-// 			out_mdepth,
-// 			out_distortion,
-// 			out_wd,
-// 			out_wd2,
-// 			accum_coord,
-// 			normal_length);
-// }
 
 void FORWARD::preprocess(int P, int D, int M,
 	const float* means3D,

@@ -85,6 +85,7 @@ namespace FORWARD
 		float* out_wd,
 		float* out_wd2,
 		float* accum_coord,
+		float* accum_depth,
 		float* normal_length,
 		bool geo,
 		bool depth);

@@ -88,6 +88,8 @@ namespace CudaRasterizer
 			const float* dL_dpix,
 			const float* dL_dpix_coord,
 			const float* dL_dpix_mcoord,
+			const float* dL_dpix_depth,
+			const float* dL_dpix_mdepth,
 			const float* dL_dalphas,
 			const float* dL_dpixel_normals,
 			const float* dL_ddistortions,
@@ -96,8 +98,9 @@ namespace CudaRasterizer
 			float* dL_dconic,
 			float* dL_dopacity,
 			float* dL_dcolor,
-			float* dL_ddepth,
+			float* dL_dts,
 			float* dL_dcamera_planes,
+			float* dL_dray_planes,
 			float* dL_dnormals,
 			float* dL_dmean3D,
 			float* dL_dcov3D,
@@ -105,6 +108,7 @@ namespace CudaRasterizer
 			float* dL_dscale,
 			float* dL_drot,
 			bool geo_reg = true,
+			bool require_depth = true,
 			bool debug = false);
 		
 		static int integrate(

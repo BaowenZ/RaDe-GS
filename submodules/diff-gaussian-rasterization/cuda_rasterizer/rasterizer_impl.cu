@@ -231,6 +231,7 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	obtain(chunk, img.wd, N, 128);
 	obtain(chunk, img.wd2, N, 128);
 	obtain(chunk, img.accum_coord, N * 3, 128);
+	obtain(chunk, img.accum_depth, N, 128);
 	obtain(chunk, img.normal_length, N, 128);
 	return img;
 }
@@ -421,6 +422,7 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.wd,
 		imgState.wd2,
 		imgState.accum_coord,
+		imgState.accum_depth,
 		imgState.normal_length,
 		geo_reg,
 		require_depth), debug);
@@ -455,6 +457,8 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* dL_dpix,
 	const float* dL_dpix_coord,
 	const float* dL_dpix_mcoord,
+	const float* dL_dpix_depth,
+	const float* dL_dpix_mdepth,
 	const float* dL_dalphas,
 	const float* dL_dpixel_normals,
 	const float* dL_ddistortions,
@@ -463,8 +467,9 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dconic,
 	float* dL_dopacity,
 	float* dL_dcolor,
-	float* dL_ddepth,
+	float* dL_dts,
 	float* dL_dcamera_planes,
+	float* dL_dray_planes,
 	float* dL_dnormals,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
@@ -472,6 +477,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dscale,
 	float* dL_drot,
 	bool geo_reg,
+	bool require_depth,
 	bool debug)
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
@@ -493,7 +499,6 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
-	const float* depth_ptr = geomState.depths;
 	CHECK_CUDA(BACKWARD::render(
 		tile_grid,
 		block,
@@ -505,18 +510,23 @@ void CudaRasterizer::Rasterizer::backward(
 		geomState.means2D,
 		geomState.conic_opacity,
 		color_ptr,
-		depth_ptr,
+		geomState.depths,
+		geomState.ts,
 		geomState.camera_planes,
+		geomState.ray_planes,
 		alphas,
 		geomState.normals,
 		imgState.wd,
 		imgState.wd2,
 		imgState.accum_coord,
+		imgState.accum_depth,
 		imgState.normal_length,
 		imgState.n_contrib,
 		dL_dpix,
 		dL_dpix_coord,
 		dL_dpix_mcoord,
+		dL_dpix_depth,
+		dL_dpix_mdepth,
 		dL_dalphas,
 		dL_dpixel_normals,
 		dL_ddistortions,
@@ -527,10 +537,12 @@ void CudaRasterizer::Rasterizer::backward(
 		(float4*)dL_dconic,
 		dL_dopacity,
 		dL_dcolor,
-		dL_ddepth,
+		dL_dts,
 		dL_dcamera_planes,
+		(float2*)dL_dray_planes,
 		dL_dnormals,
-		geo_reg), debug)
+		geo_reg,
+		require_depth), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
@@ -556,8 +568,9 @@ void CudaRasterizer::Rasterizer::backward(
 		(float3*)dL_dview_points,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
-		dL_ddepth,
+		dL_dts,
 		(float2*)dL_dcamera_planes,
+		(float2*)dL_dray_planes,
 		dL_dnormals,
 		dL_dcov3D,
 		dL_dsh,

@@ -56,8 +56,9 @@ class ModelParams(ParamGroup):
         self.data_device = "cuda"
         self.eval = False
         self.use_decoupled_appearance = False
+        self.use_coord_map = False
         self.disable_filter3D = False
-        self.kernel_size = 0.0
+        self.kernel_size = 0.0 # Size of 2D filter in mip-splatting
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

@@ -15,3 +15,5 @@ dtu_eval/Offical_DTU_Dataset
 *.sh
 submodules/diff-gaussian-rasterization-org
 snapshot_fw.dump
+snapshot_bw.dump
+train_test_depth.py

@@ -125,6 +125,8 @@ class _RasterizeGaussians(torch.autograd.Function):
                 grad_color,
                 grad_coord,
                 grad_mcoord,
+                grad_depth,
+                grad_mdepth,
                 grad_alpha,
                 grad_normal,
                 grad_distortion,
@@ -138,6 +140,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                 imgBuffer,
                 alpha,
                 raster_settings.geo_reg,
+                raster_settings.require_depth,
                 raster_settings.debug)
 
         # Compute gradients for relevant tensors by invoking backward method

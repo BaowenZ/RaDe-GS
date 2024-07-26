@@ -151,7 +151,8 @@ __global__ void computeCov2DCUDA(int P,
 	const float kernel_size,
 	const float* view_matrix,
 	const float* dL_dconics,
-	const float2* dL_depths_plane,
+	const float2* dL_dcamera_planes,
+	const float2* dL_dray_planes,
 	const float* dL_dnormals,
 	glm::vec3* dL_dmeans,
 	float* dL_dcov,
@@ -172,11 +173,12 @@ __global__ void computeCov2DCUDA(int P,
 	const glm::vec3 dL_dnormal = { dL_dnormals[idx*3],dL_dnormals[idx*3+1],dL_dnormals[idx*3+2]};
 	const float4 conic = conic_opacity[idx];
 	const float combined_opacity = conic.w;
-	const float2 dL_depth_plane0 = dL_depths_plane[idx*3];
-	const float2 dL_depth_plane1 = dL_depths_plane[idx*3+1];
-	const float2 dL_depth_plane2 = dL_depths_plane[idx*3+2];
-	// const float2& dL_depth_plane = dL_depths_plane[idx];
-	// printf("%.10f %.10f \n",dL_depth_plane.x,dL_depth_plane.y);
+	const float2 dL_camera_plane0 = dL_dcamera_planes[idx*3];
+	const float2 dL_camera_plane1 = dL_dcamera_planes[idx*3+1];
+	const float2 dL_camera_plane2 = dL_dcamera_planes[idx*3+2];
+
+	const float2 dL_dray_plane = dL_dray_planes[idx];
+
 	float3 t = transformPoint4x3(mean, view_matrix);
 	
 	const float limx = 1.3f * tan_fovx;
@@ -256,7 +258,7 @@ __global__ void computeCov2DCUDA(int P,
 	float v2 = tytz * tytz;
 	float uv = txtz * tytz;
 
-	glm::mat3 dL_dVrk = glm::mat3();
+	glm::mat3 dL_dVrk;
 	glm::vec3 plane;
 	float dL_du;
 	float dL_dv;
@@ -298,15 +300,16 @@ __global__ void computeCov2DCUDA(int P,
 
 		float clamp_vb = max(vb, 0.0000001f);
 		float clamp_vbn = max(vbn, 0.0000001f);
-		// float factor = t.z / ((u2+v2+1) * clamp_vb);
-		// float factor2 = t.z / (u2+v2+1);
-		float factor_normal = l / (u2+v2+1);
+		nl = u2+v2+1;
+		float factor_normal = l / nl;
 		glm::vec3 uvh_m_vb = uvh_mn/clamp_vbn;
 		plane = nJ_inv * uvh_m_vb;
-		nl = u2+v2+1;
-		glm::vec2 ray_depth_plane0 = {(-(v2 + 1)*t.z+plane[0]*t.x)/nl, (uv*t.z+plane[1]*t.x)/nl};
-		glm::vec2 ray_depth_plane1 = {(uv*t.z+plane[0]*t.y)/nl, (-(u2 + 1)*t.z+plane[1]*t.y)/nl};
-		glm::vec2 ray_depth_plane2 = {(t.x+plane[0]*t.z)/nl, (t.y+plane[1]*t.z)/nl};
+		
+		glm::vec2 camera_plane0 = {(-(v2 + 1)*t.z+plane[0]*t.x)/nl, (uv*t.z+plane[1]*t.x)/nl};
+		glm::vec2 camera_plane1 = {(uv*t.z+plane[0]*t.y)/nl, (-(u2 + 1)*t.z+plane[1]*t.y)/nl};
+		glm::vec2 camera_plane2 = {(t.x+plane[0]*t.z)/nl, (t.y+plane[1]*t.z)/nl};
+
+		glm::vec2 ray_plane = {plane[0]*factor_normal, plane[1]*factor_normal};
 
 		glm::vec3 ray_normal_vector = {-plane[0]*factor_normal, -plane[1]*factor_normal, -1};
 
@@ -324,35 +327,29 @@ __global__ void computeCov2DCUDA(int P,
 		glm::vec3 dL_dcam_normal_vector = dL_dnormal_lv - normal_vector * glm::dot(normal_vector,dL_dnormal_lv);
 		glm::vec3 dL_dray_normal_vector = glm::transpose(nJ) * dL_dcam_normal_vector;
 		dL_dnJ = glm::outerProduct(dL_dcam_normal_vector,ray_normal_vector);
-		dL_dl = (-plane[0] * dL_dray_normal_vector.x - plane[1] * dL_dray_normal_vector.y) / (u2+v2+1);
+		dL_dl = (-plane[0] * dL_dray_normal_vector.x - plane[1] * dL_dray_normal_vector.y
+					+ plane[0] * dL_dray_plane.x + plane[1] * dL_dray_plane.y) / nl;
 		
 		glm::vec2 dL_dplane = glm::vec2(
-			t.x/nl*dL_depth_plane0.x + t.y/nl*dL_depth_plane1.x + t.z/nl*dL_depth_plane2.x 
-												 -factor_normal * dL_dray_normal_vector[0],
-			t.x/nl*dL_depth_plane0.y + t.y/nl*dL_depth_plane1.y + t.z/nl*dL_depth_plane2.y
-												 -factor_normal * dL_dray_normal_vector[1]
+			(t.x*dL_camera_plane0.x + t.y*dL_camera_plane1.x + t.z*dL_camera_plane2.x 
+												 -l * dL_dray_normal_vector[0] + dL_dray_plane.x * l) / nl,
+			(t.x*dL_camera_plane0.y + t.y*dL_camera_plane1.y + t.z*dL_camera_plane2.y
+												 -l * dL_dray_normal_vector[1] + dL_dray_plane.y * l) / nl
 		);
 		glm::vec3 dL_dplane_append = glm::vec3(dL_dplane.x, dL_dplane.y, 0);
 
-		// float dL_dnl = -dL_depth_plane0.x * ray_depth_plane0.x / nl - dL_depth_plane0.y * ray_depth_plane0.y / nl
-		// 				-dL_depth_plane1.x * ray_depth_plane1.x / nl - dL_depth_plane1.y * ray_depth_plane1.y / nl
-		// 				-dL_depth_plane2.x * ray_depth_plane2.x / nl - dL_depth_plane2.y * ray_depth_plane2.y / nl
-		// 				-dL_dray_normal_vector[0] * ray_normal_vector.x / nl - dL_dray_normal_vector[1] * ray_normal_vector.y / nl;
-		float dL_dnl = (-dL_depth_plane0.x * ray_depth_plane0.x - dL_depth_plane0.y * ray_depth_plane0.y
-						-dL_depth_plane1.x * ray_depth_plane1.x - dL_depth_plane1.y * ray_depth_plane1.y
-						-dL_depth_plane2.x * ray_depth_plane2.x - dL_depth_plane2.y * ray_depth_plane2.y
-						-dL_dray_normal_vector[0] * ray_normal_vector.x - dL_dray_normal_vector[1] * ray_normal_vector.y) / nl;
-		
+		float dL_dnl = (-dL_camera_plane0.x * camera_plane0.x - dL_camera_plane0.y * camera_plane0.y
+						-dL_camera_plane1.x * camera_plane1.x - dL_camera_plane1.y * camera_plane1.y
+						-dL_camera_plane2.x * camera_plane2.x - dL_camera_plane2.y * camera_plane2.y
+						-dL_dray_normal_vector[0] * ray_normal_vector.x - dL_dray_normal_vector[1] * ray_normal_vector.y
+						-dL_dray_plane.x*ray_plane.x - dL_dray_plane.y*ray_plane.y) / nl;
 
-		// tmp = dL_depth_plane.x * depth_plane.x + dL_depth_plane.y * depth_plane.y;
+
 		tmp = dL_dplane.x * plane.x + dL_dplane.y * plane.y;
-
-		// glm::vec3 dL_dplane = {dL_depth_plane.x * (factor), dL_depth_plane.y * (factor), 0};
 
 		glm::vec3 W_uvh = W * uvh;
 
 		if(well_conditioned){
-			// dL_dVrk = - glm::outerProduct(Vrk_inv * W_uvh, (Vrk_inv/clamp_vb) * (W_uvh * (-tmp) + W * glm::transpose(nJ_inv) * glm::vec3(dL_depth_plane.x * factor2, dL_depth_plane.y * factor2, 0)));
 			dL_dVrk = - glm::outerProduct(Vrk_inv * W_uvh, (Vrk_inv/clamp_vb) * (W_uvh * (-tmp) + W * glm::transpose(nJ_inv) * dL_dplane_append));
 		}
 		else{
@@ -372,30 +369,18 @@ __global__ void computeCov2DCUDA(int P,
 		}
 		
 		
-		// glm::vec3 vec_dL_depth_plane = glm::vec3(dL_depth_plane.x,dL_depth_plane.y,0);
-		// glm::vec3 dL_duvh = 2 * (-tmp) * uvh_m_vb + (cov_cam_inv/clamp_vb) * glm::transpose(nJ_inv) * glm::vec3(dL_depth_plane.x * factor2, dL_depth_plane.y * factor2, 0);
 		glm::vec3 dL_duvh = 2 * (-tmp) * uvh_m_vb + (cov_cam_inv/clamp_vb) * glm::transpose(nJ_inv) * dL_dplane_append;
 		
-		// glm::mat3 dL_dnJ_inv = glm::outerProduct(vec_dL_depth_plane, uvh_m_vb * factor2);
 		glm::mat3 dL_dnJ_inv = glm::outerProduct(dL_dplane_append, uvh_m_vb);
-
-		// dL_du = -tmp * 2 * txtz / (u2+v2+1)
-		// 		+ dL_duvh.x 
-		// 		+ (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-tytz) + 2 * dL_dnJ_inv[1][1] * txtz - dL_dnJ_inv[2][0];
-		// 		// + dL_dl_z * txtz / sqrt(u2+v2+1); //this line is from normal
-
-		// glm::vec2 ray_depth_plane0 = {(-(v2 + 1)*t.z+plane[0]*t.x)/nl, (uv*t.z+plane[1]*t.x)/nl};
-		// glm::vec2 ray_depth_plane1 = {(uv*t.z+plane[0]*t.y)/nl, (-(u2 + 1)*t.z+plane[1]*t.y)/nl};
-		// glm::vec2 ray_depth_plane2 = {(t.x+plane[0]*t.z)/nl, (t.y+plane[1]*t.z)/nl};
 		
 		dL_du = dL_dnl * 2 * txtz
 				+ dL_duvh.x 
 				+ (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-tytz) + 2 * dL_dnJ_inv[1][1] * txtz - dL_dnJ_inv[2][0]
-				+ (dL_depth_plane0.y * t.y + dL_depth_plane1.x * t.y + dL_depth_plane1.y * (-2*t.x)) / nl;
+				+ (dL_camera_plane0.y * t.y + dL_camera_plane1.x * t.y + dL_camera_plane1.y * (-2*t.x)) / nl;
 		dL_dv = dL_dnl * 2 * tytz
 				+ dL_duvh.y 
 				+ (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-txtz) + 2 * dL_dnJ_inv[0][0] * tytz - dL_dnJ_inv[2][1]
-				+ (dL_depth_plane0.x * (-2*t.y) + dL_depth_plane0.y * t.x + dL_depth_plane1.x * t.x) / nl;;
+				+ (dL_camera_plane0.x * (-2*t.y) + dL_camera_plane0.y * t.x + dL_camera_plane1.x * t.x) / nl;;
 	}
 
 	const float opacity = combined_opacity / (coef + 1e-6);
@@ -491,22 +476,19 @@ __global__ void computeCov2DCUDA(int P,
 	float tz2 = tz * tz;
 	float tz3 = tz2 * tz;
 
-	// glm::vec2 ray_depth_plane0 = {(-(v2 + 1)*t.z+plane[0]*t.x)/nl, (uv*t.z+plane[1]*t.x)/nl};
-	// glm::vec2 ray_depth_plane1 = {(uv*t.z+plane[0]*t.y)/nl, (-(u2 + 1)*t.z+plane[1]*t.y)/nl};
-	// glm::vec2 ray_depth_plane2 = {(t.x+plane[0]*t.z)/nl, (t.y+plane[1]*t.z)/nl};
 	float dL_dtx = x_grad_mul * (-h_x * tz2 * dL_dJ02 + dL_du * tz
 								-dL_dnJ[0][2]*tz2 + dL_dnJ[2][0]*(1/lv-t.x*t.x/lv3) + dL_dnJ[2][2]*(-t.x*t.z/lv3) //this line is from normal
-								+(dL_depth_plane0.x * plane[0] + dL_depth_plane0.y * plane[1] + dL_depth_plane2.x)/nl
+								+(dL_camera_plane0.x * plane[0] + dL_camera_plane0.y * plane[1] + dL_camera_plane2.x)/nl
 								+dL_dl*t.x/l);
 	float dL_dty = y_grad_mul * (-h_y * tz2 * dL_dJ12 + dL_dv * tz
 								-dL_dnJ[1][2]*tz2 + dL_dnJ[2][1]*(1/lv-t.y*t.y/lv3) + dL_dnJ[2][2]*(-t.y*t.z/lv3) //this line is from normal
-								+(dL_depth_plane1.x * plane[0] + dL_depth_plane1.y * plane[1] + dL_depth_plane2.y)/nl
+								+(dL_camera_plane1.x * plane[0] + dL_camera_plane1.y * plane[1] + dL_camera_plane2.y)/nl
 								+dL_dl*t.y/l);
 	float dL_dtz = -h_x * tz2 * dL_dJ00 - h_y * tz2 * dL_dJ11 + (2 * h_x * t.x) * tz3 * dL_dJ02 + (2 * h_y * t.y) * tz3 * dL_dJ12
 					- (dL_du * t.x + dL_dv * t.y) * tz2 + tmp * tz
 					+ dL_dnJ[0][0] * (-tz2) + dL_dnJ[1][1] * (-tz2) + dL_dnJ[0][2] * (2*t.x*tz3) + dL_dnJ[1][2] * (2*t.y*tz3) // two lines are from normal
 					+ (dL_dnJ[2][0]*t.x+dL_dnJ[2][1]*t.y)*(-t.z/lv3) + dL_dnJ[2][2]*(1/lv-t.z*t.z/lv3) // two lines are from normal
-					+ (dL_depth_plane0.x * (-(v2 + 1)) + dL_depth_plane0.y * uv + dL_depth_plane1.x * uv + dL_depth_plane1.y * (-(u2+1)) + dL_depth_plane2.x * plane[0] + dL_depth_plane2.y * plane[1])/nl
+					+ (dL_camera_plane0.x * (-(v2 + 1)) + dL_camera_plane0.y * uv + dL_camera_plane1.x * uv + dL_camera_plane1.y * (-(u2+1)) + dL_camera_plane2.x * plane[0] + dL_camera_plane2.y * plane[1])/nl
 					+ dL_dl*t.z/l;
 
 
@@ -607,8 +589,7 @@ __global__ void preprocessCUDA(
 	const float3* dL_dview_points,
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
-	const float* dL_ddepth,
-	const float2* dL_ddepth_plane,
+	const float* dL_dts,
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
@@ -638,21 +619,26 @@ __global__ void preprocessCUDA(
 
 	// Compute loss gradient w.r.t. 3D means due to gradients of depth
 	// from rendering procedure
-	glm::vec3 dL_dmean2;
-	float mul3 = view[2] * m.x + view[6] * m.y + view[10] * m.z + view[14];
-	dL_dmean2.x = (view[2] - view[3] * mul3) * dL_ddepth[idx];
-	dL_dmean2.y = (view[6] - view[7] * mul3) * dL_ddepth[idx];
-	dL_dmean2.z = (view[10] - view[11] * mul3) * dL_ddepth[idx];
+	// glm::vec3 dL_dmean2;
+	// float mul3 = view[2] * m.x + view[6] * m.y + view[10] * m.z + view[14];
+	// dL_dmean2.x = (view[2] - view[3] * mul3) * dL_ddepth[idx];
+	// dL_dmean2.y = (view[6] - view[7] * mul3) * dL_ddepth[idx];
+	// dL_dmean2.z = (view[10] - view[11] * mul3) * dL_ddepth[idx];
+	float t = sqrt(m_view.x*m_view.x+m_view.y*m_view.y+m_view.z*m_view.z);
+	float dL_dt = dL_dts[idx];
 
 	float3 dL_dview_point = dL_dview_points[idx];
-	float3 dL_dmean3 = transformVec4x3Transpose(dL_dview_point, view);
+	// float3 dL_dmean3 = transformVec4x3Transpose(dL_dview_point, view);
+	float3 dL_dmean2 = transformVec4x3Transpose({dL_dview_point.x+m_view.x/t*dL_dt,
+												dL_dview_point.y+m_view.y/t*dL_dt,
+												dL_dview_point.z+m_view.z/t*dL_dt}, view);
 
 	// That's the third part of the mean gradient.
 	// dL_dmeans[idx] += dL_dmean1 + dL_dmean2 + {dL_dmean3.x, dL_dmean3.y, dL_dmean3.z};
 	dL_dmeans[idx] += glm::vec3(
-		dL_dmean1.x + dL_dmean2.x + dL_dmean3.x,
-		dL_dmean1.y + dL_dmean2.y + dL_dmean3.y,
-		dL_dmean1.z + dL_dmean2.z + dL_dmean3.z
+		dL_dmean1.x + dL_dmean2.x,
+		dL_dmean1.y + dL_dmean2.y,
+		dL_dmean1.z + dL_dmean2.z
 	);
 
 	// Compute gradient updates due to computing colors from SHs
@@ -665,7 +651,7 @@ __global__ void preprocessCUDA(
 }
 
 // Backward version of the rendering procedure.
-template <uint32_t C, bool GEO = true>
+template <uint32_t C, bool GEO = true, bool DEPTH = true>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
 	const uint2* __restrict__ ranges,
@@ -677,17 +663,22 @@ renderCUDA(
 	const float4* __restrict__ conic_opacity,
 	const float* __restrict__ colors,
 	const float* __restrict__ depths,
+	const float* __restrict__ ts,
 	const float* __restrict__ camera_planes,
+	const float2* __restrict__ ray_planes,
 	const float* __restrict__ alphas,
 	const float3* __restrict__ normals,
 	const float* __restrict__ wd_map,
 	const float* __restrict__ wd2_map,
 	const float* __restrict__ accum_coord,
+	const float* __restrict__ accum_depth,
 	const float* __restrict__ normal_length,
 	const uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ dL_dpixels,
 	const float* __restrict__ dL_dpixel_coords,
 	const float* __restrict__ dL_dpixel_mcoords,
+	const float* __restrict__ dL_dpixel_depths,
+	const float* __restrict__ dL_dpixel_mdepths,
 	const float* __restrict__ dL_dalphas,
 	const float* __restrict__ dL_dpixel_normals,
 	const float* __restrict__ dL_ddistortions,
@@ -699,8 +690,9 @@ renderCUDA(
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
-	float* __restrict__ dL_ddepths,
+	float* __restrict__ dL_dts,
 	float* __restrict__ dL_dcamera_planes,
+	float2* __restrict__ dL_dray_planes,
 	float* __restrict__ dL_dnormals
 )
 {
@@ -712,6 +704,8 @@ renderCUDA(
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	const uint32_t pix_id = W * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x, (float)pix.y };
+	const float2 pixnf = {(pixf.x-W/2.f)/focal_x,(pixf.y-H/2.f)/focal_y};
+	const float ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
 
 	const bool inside = pix.x < W&& pix.y < H;
 	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
@@ -728,8 +722,8 @@ renderCUDA(
 	__shared__ float collected_camera_planes[6 * BLOCK_SIZE];
 	__shared__ float collected_mean3d[3 * BLOCK_SIZE];
 	__shared__ float collected_normals[3 * BLOCK_SIZE];
-	__shared__ float collected_depths[BLOCK_SIZE];
-
+	__shared__ float collected_ts[BLOCK_SIZE];
+	__shared__ float2 collected_ray_planes[BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -752,9 +746,10 @@ renderCUDA(
 	float accum_rec[C] = { 0 };
 	float dL_dpixel[C];
 	float accum_coord_rec[3] = {0};
-	float dL_ddistortion;
-	float accum_distortion_rec = 0;
 	float dL_dpixel_coord[3];
+	float accum_t_rec = 0;
+	float dL_dpixel_t;
+	float dL_dpixel_mt;
 	float accum_alpha_rec = 0;
 	float dL_dalpha;
 	float accum_normal_rec[3] = {0};
@@ -784,7 +779,7 @@ renderCUDA(
 				dL_dpixel_coord[i] = dL_dpixel_coord_w[i] / w_final;
 				dL_dpixel_mcoord[i] = dL_dpixel_mcoords[i * H * W + pix_id];
 			}
-			dL_ddistortion = dL_ddistortions[pix_id] / ww;
+
 			glm::vec3 dL_dpixel_normaln = glm::vec3(dL_dpixel_normals[pix_id],
 													dL_dpixel_normals[H * W + pix_id],
 													dL_dpixel_normals[2 * H * W + pix_id]);
@@ -794,17 +789,26 @@ renderCUDA(
 			float normal_len = normal_length[pix_id];
 			glm::vec3 dL;
 			if(normal_len<NORMALIZE_EPS)
-				dL = dL_dpixel_normaln/normal_len;
+				dL = dL_dpixel_normaln/NORMALIZE_EPS;
 			else
 				dL = (dL_dpixel_normaln - glm::dot(dL_dpixel_normaln,normaln)*normaln)/normal_len;
 			for (int i = 0; i < 3; i++)
 				dL_dpixel_normal[i] = dL[i];
+			if constexpr (DEPTH)
+			{
+				float dL_dpixel_depth_w = dL_dpixel_depths[pix_id];
+				float pixel_accum_depth = accum_depth[pix_id];
+				dL_dalpha -= dL_dpixel_depth_w*pixel_accum_depth/ww;
+				dL_dpixel_t = dL_dpixel_depth_w / w_final/ ln;
+				dL_dpixel_mt = dL_dpixel_mdepths[pix_id] / ln;
+			}
 		}
 	}
 
 	float last_alpha = 0;
 	float last_color[C] = { 0 };
 	float last_coord[3] = { 0 };
+	float last_t = 0;
 	float last_dL_dw = 0;
 	float last_normal[3] = {0};
 
@@ -828,16 +832,21 @@ renderCUDA(
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 			for (int i = 0; i < C; i++)
 				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
-			collected_depths[block.thread_rank()] = depths[coll_id];
 			if constexpr (GEO)
 			{
 				for(int ch = 0; ch < 6; ch++)
 					collected_camera_planes[ch * BLOCK_SIZE + block.thread_rank()] = camera_planes[coll_id * 6 + ch];
 				for(int ch = 0; ch < 3; ch++)
 					collected_mean3d[ch * BLOCK_SIZE + block.thread_rank()] = view_points[coll_id * 3 + ch];
-				collected_normals[0 * BLOCK_SIZE + block.thread_rank()] = normals[coll_id].x;
-				collected_normals[1 * BLOCK_SIZE + block.thread_rank()] = normals[coll_id].y;
-				collected_normals[2 * BLOCK_SIZE + block.thread_rank()] = normals[coll_id].z;
+				float3 normal = normals[coll_id];
+				collected_normals[0 * BLOCK_SIZE + block.thread_rank()] = normal.x;
+				collected_normals[1 * BLOCK_SIZE + block.thread_rank()] = normal.y;
+				collected_normals[2 * BLOCK_SIZE + block.thread_rank()] = normal.z;
+				if constexpr (DEPTH)
+				{
+					collected_ray_planes[block.thread_rank()] = ray_planes[coll_id];
+					collected_ts[block.thread_rank()] = ts[coll_id];
+				}
 			}
 		}
 		block.sync();
@@ -869,7 +878,7 @@ renderCUDA(
 
 			T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
-			const float& dpixel_depth_ddepth = dchannel_dcolor;
+			const float& dpixel_t_dt = dchannel_dcolor;
 
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
@@ -892,9 +901,11 @@ renderCUDA(
 			}
 			
 			float dL_dcoords[3];
+			float dL_dt;
 			float2 camera_plane0;
 			float2 camera_plane1;
 			float2 camera_plane2;
+			float2 ray_plane;
 			if constexpr (GEO)
 			{
 				camera_plane0 = {collected_camera_planes[j], collected_camera_planes[j + BLOCK_SIZE]};
@@ -917,19 +928,6 @@ renderCUDA(
 					// many that were affected by this Gaussian.
 					atomicAdd(&(dL_dnormals[global_id * 3 + ch]), dchannel_dcolor * dL_dchannel);
 				}
-
-				// const float mapped_max_t = (FAR_PLANE * depth - FAR_PLANE * NEAR_PLANE) / ((FAR_PLANE - NEAR_PLANE) * depth);
-				// const float dmax_t_dd = (FAR_PLANE * NEAR_PLANE) / ((FAR_PLANE - NEAR_PLANE) * depth * depth);
-				
-				// // Propagate gradients from pixel depth to opacity
-				// accum_depth_rec = last_alpha * last_depth + (1.f - last_alpha) * accum_depth_rec;
-				// last_depth = depth;
-				// dL_dopa += (depth - accum_depth_rec) * dL_dpixel_depth;
-				// dL_ddepth = dpixel_depth_ddepth * dL_dpixel_depth
-				// 					+ 2 * dchannel_dcolor * (w_final * mapped_max_t - wd_final) * dL_ddistortion * dmax_t_dd;
-				// if (contributor == max_contributor-1) {
-				// 	dL_ddepth += dL_dpixel_middepth;
-				// }
 				
 				for (int ch = 0; ch < 3; ch++)
 				{
@@ -959,6 +957,25 @@ renderCUDA(
 				atomicAdd(&dL_dcamera_planes[global_id*6+3], dL_dcoords[1] * d.y / focal_y);
 				atomicAdd(&dL_dcamera_planes[global_id*6+4], dL_dcoords[2] * d.x / focal_x);
 				atomicAdd(&dL_dcamera_planes[global_id*6+5], dL_dcoords[2] * d.y / focal_y);
+
+				if constexpr (DEPTH)
+				{
+					const float t_center = collected_ts[j];
+					ray_plane = collected_ray_planes[j];
+					float t = t_center + (ray_plane.x * d.x + ray_plane.y * d.y);
+					accum_t_rec = last_alpha * last_t + (1.f - last_alpha) * accum_t_rec;
+					last_t = t;
+					dL_dopa += (t - accum_t_rec) * dL_dpixel_t;
+					dL_dt = dpixel_t_dt * dL_dpixel_t;
+					if (contributor == max_contributor-1) {
+						dL_dt += dL_dpixel_mt;
+					}
+					
+					atomicAdd(&(dL_dts[global_id]), dL_dt);
+					atomicAdd(&dL_dray_planes[global_id].x, dL_dt * d.x / focal_x);
+					atomicAdd(&dL_dray_planes[global_id].y, dL_dt * d.y / focal_y);
+				}
+
 			}
 			// Propagate gradients from pixel alpha (weights_sum) to opacity
 			accum_alpha_rec = last_alpha + (1.f - last_alpha) * accum_alpha_rec;
@@ -985,24 +1002,24 @@ renderCUDA(
 			const float dG_ddely = -gdy * con_o.z - gdx * con_o.y;
 
 			// Update gradients w.r.t. 2D mean position of the Gaussian
+			float dL_ddelx = dL_dG * dG_ddelx;
+			float dL_ddely = dL_dG * dG_ddely;
 			if constexpr (GEO)
 			{
-				// atomicAdd(&dL_dmean2D[global_id].x, (dL_dG * dG_ddelx + dL_ddepth * depth_plane.x) * ddelx_dx);
-				// atomicAdd(&dL_dmean2D[global_id].y, (dL_dG * dG_ddely + dL_ddepth * depth_plane.y) * ddely_dy);
-				atomicAdd(&dL_dmean2D[global_id].x, (dL_dG * dG_ddelx
-													+ dL_dcoords[0] * camera_plane0.x
-													+ dL_dcoords[1] * camera_plane1.x
-													+ dL_dcoords[2] * camera_plane2.x) * ddelx_dx);
-				atomicAdd(&dL_dmean2D[global_id].y, (dL_dG * dG_ddely
-													+ dL_dcoords[0] * camera_plane0.y
-													+ dL_dcoords[1] * camera_plane1.y
-													+ dL_dcoords[2] * camera_plane2.y) * ddely_dy);
+				dL_ddelx += dL_dcoords[0] * camera_plane0.x
+							+ dL_dcoords[1] * camera_plane1.x
+							+ dL_dcoords[2] * camera_plane2.x;
+				dL_ddely += dL_dcoords[0] * camera_plane0.y
+							+ dL_dcoords[1] * camera_plane1.y
+							+ dL_dcoords[2] * camera_plane2.y;
+				if constexpr (DEPTH)
+				{
+					dL_ddelx += dL_dt * ray_plane.x;
+					dL_ddely += dL_dt * ray_plane.y;
+				}
 			}
-			else
-			{
-				atomicAdd(&dL_dmean2D[global_id].x, dL_dG * dG_ddelx * ddelx_dx);
-				atomicAdd(&dL_dmean2D[global_id].y, dL_dG * dG_ddely * ddely_dy);
-			}
+			atomicAdd(&dL_dmean2D[global_id].x, dL_ddelx * ddelx_dx);
+			atomicAdd(&dL_dmean2D[global_id].y, dL_ddely * ddely_dy);
 			// fork from GOF https://github.com/autonomousvision/gaussian-opacity-fields
 			const float abs_dL_dmean2D = abs(dL_dG * dG_ddelx * ddelx_dx) + abs(dL_dG * dG_ddely * ddely_dy);
             atomicAdd(&dL_dmean2D[global_id].z, abs_dL_dmean2D);
@@ -1038,8 +1055,9 @@ void BACKWARD::preprocess(
 	const float3* dL_dview_points,
 	glm::vec3* dL_dmean3D,
 	float* dL_dcolor,
-	const float* dL_ddepth,
-	const float2* dL_ddepth_plane,
+	const float* dL_dts,
+	const float2* dL_dcamera_plane,
+	const float2* dL_dray_plane,
 	const float* dL_dnormals,
 	float* dL_dcov3D,
 	float* dL_dsh,
@@ -1064,7 +1082,8 @@ void BACKWARD::preprocess(
 		kernel_size,
 		viewmatrix,
 		dL_dconic,
-		dL_ddepth_plane,
+		dL_dcamera_plane,
+		dL_dray_plane,
 		dL_dnormals,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcov3D,
@@ -1090,14 +1109,14 @@ void BACKWARD::preprocess(
 		dL_dview_points,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
-		dL_ddepth,
-		dL_ddepth_plane,
+		dL_dts,
 		dL_dcov3D,
 		dL_dsh,
 		dL_dscale,
 		dL_drot);
 }
 
+// the Bool inputs can be replaced by an enumeration variable for different functions.
 void BACKWARD::render(
 	const dim3 grid, const dim3 block,
 	const uint2* ranges,
@@ -1109,17 +1128,22 @@ void BACKWARD::render(
 	const float4* conic_opacity,
 	const float* colors,
 	const float* depths,
+	const float* ts,
 	const float* camera_planes,
+	const float2* ray_planes,
 	const float* alphas,
 	const float3* normals,
 	const float* wd_map,
 	const float* wd2_map,
 	const float* accum_coord,
+	const float* accum_depth,
 	const float* normal_length,
 	const uint32_t* n_contrib,
 	const float* dL_dpixels,
 	const float* dL_dpixel_coords,
 	const float* dL_dpixel_mcoords,
+	const float* dL_dpixel_depth,
+	const float* dL_dpixel_mdepth,
 	const float* dL_dalphas,
 	const float* dL_dpixel_normals,
 	const float* dL_ddistortions,
@@ -1131,83 +1155,29 @@ void BACKWARD::render(
 	float4* dL_dconic2D,
 	float* dL_dopacity,
 	float* dL_dcolors,
-	float* dL_ddepths,
+	float* dL_dts,
 	float* dL_dcamera_planes,
+	float2* dL_dray_planes,
 	float* dL_dnormals,
-	bool geo_reg)
+	bool geo,
+	bool depth)
 {
-	if(geo_reg)
-		renderCUDA<NUM_CHANNELS, true> << <grid, block >> >(
-			ranges,
-			point_list,
-			W, H,
-			bg_color,
-			view_points,
-			means2D,
-			conic_opacity,
-			colors,
-			depths,
-			camera_planes,
-			alphas,
-			normals,
-			wd_map,
-			wd2_map,
-			accum_coord,
-			normal_length,
-			n_contrib,
-			dL_dpixels,
-			dL_dpixel_coords,
-			dL_dpixel_mcoords,
-			dL_dalphas,
-			dL_dpixel_normals,
-			dL_ddistortions,
-			normalmap,
-			focal_x, 
-			focal_y,
-			dL_dmean3D,
-			dL_dmean2D,
-			dL_dconic2D,
-			dL_dopacity,
-			dL_dcolors,
-			dL_ddepths,
-			dL_dcamera_planes,
-			dL_dnormals
-			);
+#define RENDER_CUDA_CALL(template_geo, template_depth) \
+    renderCUDA<NUM_CHANNELS, template_geo, template_depth> <<<grid, block>>> ( \
+        ranges, point_list, W, H, bg_color, view_points, means2D, conic_opacity, colors, \
+        depths, ts, camera_planes, ray_planes, alphas, normals, wd_map, wd2_map, \
+		accum_coord, accum_depth, normal_length, \
+        n_contrib, dL_dpixels, dL_dpixel_coords, dL_dpixel_mcoords, dL_dpixel_depth, \
+        dL_dpixel_mdepth, dL_dalphas, dL_dpixel_normals, dL_ddistortions, normalmap, \
+        focal_x, focal_y, dL_dmean3D, dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors, \
+        dL_dts, dL_dcamera_planes, dL_dray_planes, dL_dnormals)
+
+	if (geo && depth)
+		RENDER_CUDA_CALL(true, true);
+	else if (geo && !depth)
+		RENDER_CUDA_CALL(true, false);
 	else
-		renderCUDA<NUM_CHANNELS, false> << <grid, block >> >(
-			ranges,
-			point_list,
-			W, H,
-			bg_color,
-			view_points,
-			means2D,
-			conic_opacity,
-			colors,
-			depths,
-			camera_planes,
-			alphas,
-			normals,
-			wd_map,
-			wd2_map,
-			accum_coord,
-			normal_length,
-			n_contrib,
-			dL_dpixels,
-			dL_dpixel_coords,
-			dL_dpixel_mcoords,
-			dL_dalphas,
-			dL_dpixel_normals,
-			dL_ddistortions,
-			normalmap,
-			focal_x, 
-			focal_y,
-			dL_dmean3D,
-			dL_dmean2D,
-			dL_dconic2D,
-			dL_dopacity,
-			dL_dcolors,
-			dL_ddepths,
-			dL_dcamera_planes,
-			dL_dnormals
-			);
+		RENDER_CUDA_CALL(false, false);
+
+#undef RENDER_CUDA_CALL
 }

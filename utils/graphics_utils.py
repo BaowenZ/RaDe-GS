@@ -98,11 +98,6 @@ def depths_double_to_points(view, depthmap1, depthmap2):
     W, H = view.image_width, view.image_height
     fx = W / (2 * math.tan(view.FoVx / 2.))
     fy = H / (2 * math.tan(view.FoVy / 2.))
-    # intrins = torch.tensor(
-    #     [[fx, 0., W/2.],
-    #     [0., fy, H/2.],
-    #     [0., 0., 1.0]]
-    # ).float().cuda()
     intrins_inv = torch.tensor(
         [[1/fx, 0.,-W/(2 * fx)],
         [0., 1/fy, -H/(2 * fy),],
@@ -113,11 +108,11 @@ def depths_double_to_points(view, depthmap1, depthmap2):
     rays_d = intrins_inv @ points
     points1 = depthmap1.reshape(1,-1) * rays_d
     points2 = depthmap2.reshape(1,-1) * rays_d
-    return points1, points2
+    return points1.reshape(3,H,W), points2.reshape(3,H,W)
 
 
 
-def depth_double_to_normal(view, points1, points2):
+def point_double_to_normal(view, points1, points2):
     points = torch.stack([points1, points2],dim=0)
     output = torch.zeros_like(points)
     dx = points[...,2:, 1:-1] - points[...,:-2, 1:-1]
@@ -125,6 +120,10 @@ def depth_double_to_normal(view, points1, points2):
     normal_map = torch.nn.functional.normalize(torch.cross(dx, dy, dim=1), dim=1)
     output[...,1:-1, 1:-1] = normal_map
     return output
+
+def depth_double_to_normal(view, depth1, depth2):
+    points1, points2 = depths_double_to_points(view, depth1, depth2)
+    return point_double_to_normal(view, points1, points2)
 
 def bilinear_sampler(img, coords, mask=False):
     """ Wrapper for grid_sample, uses pixel coordinates """
