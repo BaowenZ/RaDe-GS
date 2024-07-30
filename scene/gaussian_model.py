@@ -712,51 +712,6 @@ class GaussianModel:
         
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
-    # def densify_and_clone(self, grads, grad_threshold,  grads_abs, grad_abs_threshold, scene_extent):
-    #     # Extract points that satisfy the gradient condition
-    #     selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
-    #     selected_pts_mask_abs = torch.where(torch.norm(grads_abs, dim=-1) >= grad_abs_threshold, True, False)
-    #     selected_pts_mask = torch.logical_or(selected_pts_mask, selected_pts_mask_abs)
-    #     selected_pts_mask = torch.logical_and(selected_pts_mask,
-    #                                           torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
-        
-    #     new_xyz = self._xyz[selected_pts_mask]
-    #     # sample a new gaussian instead of fixing position
-    #     stds = self.get_scaling[selected_pts_mask]
-    #     means =torch.zeros((stds.size(0), 3),device="cuda")
-    #     samples = torch.normal(mean=means, std=stds)
-    #     rots = build_rotation(self._rotation[selected_pts_mask])
-    #     # new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask]
-    #     new_xyz = torch.cat([new_xyz,
-    #                          torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + new_xyz])
-        
-    #     new_features_dc = self._features_dc[selected_pts_mask].repeat(2, 1, 1)
-    #     new_features_rest = self._features_rest[selected_pts_mask].repeat(2, 1, 1)
-    #     # new_opacities = self._opacity[selected_pts_mask]
-
-    #     # scales = self.get_scaling[selected_pts_mask]
-    #     # scales_square = torch.square(scales)
-    #     # det1 = scales_square.prod(dim=1) 
-    #     # scales_after_square = scales_square + torch.square(self.filter_3D[selected_pts_mask]) 
-    #     # det2 = scales_after_square.prod(dim=1) 
-    #     # coef = torch.sqrt(det1 / det2)
-    #     # new_opacities = 1-torch.sqrt(1-self.get_opacity[selected_pts_mask]*coef[..., None])
-    #     # new_opacities = new_opacities / coef[..., None]
-    #     # new_opacities = self.inverse_opacity_activation(new_opacities)
-    #     new_opacities = self.inverse_opacity_activation(1-torch.sqrt(1-self.get_opacity[selected_pts_mask]))
-
-    #     # new_opacities = self.inverse_opacity_activation(1-torch.sqrt(1-self.get_opacity[selected_pts_mask])).repeat(2, 1)
-    #     new_opacities = new_opacities.repeat(2, 1)
-    #     new_scaling = self._scaling[selected_pts_mask].repeat(2, 1)
-    #     new_rotation = self._rotation[selected_pts_mask].repeat(2, 1)
-        
-    #     self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
-
-    #     prune_filter = torch.cat((selected_pts_mask, torch.zeros(2 * selected_pts_mask.sum(), device="cuda", dtype=bool)))
-    #     self.prune_points(prune_filter)
-
-    #     return selected_pts_mask
-
 
     # use the same densification strategy as GOF https://github.com/autonomousvision/gaussian-opacity-fields
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size):
@@ -771,9 +726,7 @@ class GaussianModel:
         before = self._xyz.shape[0]
         self.densify_and_clone(grads, max_grad, grads_abs, Q, extent)
         clone = self._xyz.shape[0]
-        
-        # self.densify_and_split(grads[torch.logical_not(selected_pts_mask_dense)], max_grad, 
-        #                        grads_abs[torch.logical_not(selected_pts_mask_dense)], Q, extent)
+
         self.densify_and_split(grads, max_grad, grads_abs, Q, extent)
         split = self._xyz.shape[0]
 

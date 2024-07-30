@@ -16,7 +16,7 @@ from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, kernel_size, scaling_modifier = 1.0, geo_reg : bool = True, require_depth : bool = True):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, kernel_size, scaling_modifier = 1.0, require_coord : bool = True, require_depth : bool = True):
     """
     Render the scene. 
     
@@ -45,7 +45,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
-        geo_reg = geo_reg,
+        require_coord = require_coord,
         require_depth = require_depth,
         debug=pipe.debug
     )
@@ -68,7 +68,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     shs = pc.get_features
     colors_precomp = None
 
-    rendered_image, radii, rendered_expected_coord, rendered_median_coord, rendered_expected_depth, rendered_median_depth, rendered_alpha, rendered_normal, depth_distortion = rasterizer(
+    rendered_image, radii, rendered_expected_coord, rendered_median_coord, rendered_expected_depth, rendered_median_depth, rendered_alpha, rendered_normal = rasterizer(
         means3D = means3D,
         means2D = means2D,
         shs = shs,
@@ -129,7 +129,7 @@ def integrate(points3D, viewpoint_camera, pc : GaussianModel, pipe, bg_color : t
         prefiltered=False,
         debug=pipe.debug,
         require_depth = True,
-        geo_reg=True
+        require_coord=True
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)

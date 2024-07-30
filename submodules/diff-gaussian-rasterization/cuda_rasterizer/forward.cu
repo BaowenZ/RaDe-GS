@@ -134,7 +134,7 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 
 	glm::mat3 Vrk_eigen_vector;
 	glm::vec3 Vrk_eigen_value;
-	int D = glm::findEigenvaluesSymReal(Vrk,Vrk_eigen_value,Vrk_eigen_vector);
+	int D = glm_modification::findEigenvaluesSymReal(Vrk,Vrk_eigen_value,Vrk_eigen_vector);
 
 	unsigned int min_id = Vrk_eigen_value[0]>Vrk_eigen_value[1]? (Vrk_eigen_value[1]>Vrk_eigen_value[2]?2:1):(Vrk_eigen_value[0]>Vrk_eigen_value[2]?2:0);
 
@@ -150,15 +150,7 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 	}
 	else
 	{
-		if(D<3)
-		{
-			const glm::vec3 eigenvector1 = Vrk_eigen_vector[(min_id+1)%3];
-			const glm::vec3 eigenvector2 = Vrk_eigen_vector[(min_id+2)%3];
-			eigenvector_min = glm::cross(eigenvector1, eigenvector2);
-		}
-		else{
-			eigenvector_min = Vrk_eigen_vector[min_id];
-		}
+		eigenvector_min = Vrk_eigen_vector[min_id];
 		Vrk_inv = glm::outerProduct(eigenvector_min,eigenvector_min);
 	}
 	
@@ -166,7 +158,8 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 	glm::vec3 uvh = {txtz, tytz, 1};
 	glm::vec3 uvh_m = cov_cam_inv * uvh;
 	glm::vec3 uvh_mn = glm::normalize(uvh_m);
-	if(isnan(uvh_mn.x))
+
+	if(isnan(uvh_mn.x)|| D==0)
 	{
 		for(int ch = 0; ch < 6; ch++)
 			camera_plane[ch] = 0;
@@ -181,9 +174,9 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 
 		float l = sqrt(t.x*t.x+t.y*t.y+t.z*t.z);
 		glm::mat3 nJ = glm::mat3(
-		1 / t.z, 0.0f, -(t.x) / (t.z * t.z),
-		0.0f, 1 / t.z, -(t.y) / (t.z * t.z),
-		t.x/l, t.y/l, t.z/l);
+			1 / t.z, 0.0f, -(t.x) / (t.z * t.z),
+			0.0f, 1 / t.z, -(t.y) / (t.z * t.z),
+			t.x/l, t.y/l, t.z/l);
 
 		glm::mat3 nJ_inv = glm::mat3(
 			v2 + 1,	-uv, 		0,
@@ -211,7 +204,7 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 				glm::mat3 cov_ray = glm::transpose(T2) * Vrk_inv * T2;
 				glm::mat3 cov_eigen_vector;
 				glm::vec3 cov_eigen_value;
-				glm::findEigenvaluesSymReal(cov_ray,cov_eigen_value,cov_eigen_vector);
+				glm_modification::findEigenvaluesSymReal(cov_ray,cov_eigen_value,cov_eigen_vector);
 				unsigned int min_id = cov_eigen_value[0]>cov_eigen_value[1]? (cov_eigen_value[1]>cov_eigen_value[2]?2:1):(cov_eigen_value[0]>cov_eigen_value[2]?2:0);
 				float lambda1 = cov_eigen_value[(min_id+1)%3];
 				float lambda2 = cov_eigen_value[(min_id+2)%3];
@@ -432,7 +425,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
-template <uint32_t CHANNELS, bool GEO, bool DEPTH>
+template <uint32_t CHANNELS, bool COORD, bool DEPTH, bool NORMAL>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
 	const uint2* __restrict__ ranges,
@@ -457,9 +450,6 @@ renderCUDA(
 	float* __restrict__ out_normal,
 	float* __restrict__ out_depth,
 	float* __restrict__ out_mdepth,
-	float* __restrict__ out_distortion,
-	float* __restrict__ out_wd,
-	float* __restrict__ out_wd2,
 	float* __restrict__ accum_coord,
 	float* __restrict__ accum_depth,
 	float* __restrict__ normal_length
@@ -475,6 +465,8 @@ renderCUDA(
 	float2 pixf = { (float)pix.x, (float)pix.y };
 	float2 pixnf = {(pixf.x-W/2.f)/focal_x,(pixf.y-H/2.f)/focal_y};
 	float ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
+
+	constexpr bool GEO = DEPTH || COORD || NORMAL;
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -511,12 +503,6 @@ renderCUDA(
 	float Normal[3] = {0};
 	float last_depth = 0;
 	float last_weight = 0;
-	float A_i_minus_1 = 0;
-	float B_i_minus_1 = 0;
-	float D_i_minus_1 = 0;
-	float depth_distortion = 0;
-	float dist1 = 0;
-	float dist2 = 0;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -536,18 +522,21 @@ renderCUDA(
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 			for(int ch = 0; ch < CHANNELS; ch++)
 				collected_feature[ch * BLOCK_SIZE + block.thread_rank()] = features[coll_id * CHANNELS + ch];
-			if constexpr (GEO)
+			if constexpr (COORD)
 			{
-				if constexpr (DEPTH)
-				{
-					collected_ts[block.thread_rank()] = ts[coll_id];
-					collected_ray_planes[block.thread_rank()] = ray_planes[coll_id];
-				}
-				collected_normals[block.thread_rank()] = normals[coll_id];
 				for(int ch = 0; ch < 6; ch++)
 					collected_camera_plane[ch * BLOCK_SIZE + block.thread_rank()] = camera_planes[coll_id * 6 + ch];
 				for(int ch = 0; ch < 3; ch++)
 					collected_mean3d[ch * BLOCK_SIZE + block.thread_rank()] = view_points[coll_id * 3 + ch];
+			}
+			if constexpr (DEPTH)
+			{
+				collected_ts[block.thread_rank()] = ts[coll_id];
+				collected_ray_planes[block.thread_rank()] = ray_planes[coll_id];
+			}
+			if constexpr (NORMAL)
+			{
+				collected_normals[block.thread_rank()] = normals[coll_id];
 			}
 		}
 		block.sync();
@@ -587,50 +576,47 @@ renderCUDA(
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += collected_feature[j + BLOCK_SIZE * ch] * aT;
-			if constexpr (GEO)
+
+			bool before_median = T > 0.5;
+			if constexpr (COORD)
 			{
-				bool before_median = T > 0.5;
 				float2 camera_plane0 = {collected_camera_plane[j], collected_camera_plane[j + BLOCK_SIZE]};
 				float2 camera_plane1 = {collected_camera_plane[j + BLOCK_SIZE * 2], collected_camera_plane[j + BLOCK_SIZE * 3]};
 				float2 camera_plane2 = {collected_camera_plane[j + BLOCK_SIZE * 4], collected_camera_plane[j + BLOCK_SIZE * 5]};
 				float coord[3] = {collected_mean3d[j] + camera_plane0.x * d.x + camera_plane0.y * d.y,
 									collected_mean3d[j + BLOCK_SIZE] + camera_plane1.x * d.x + camera_plane1.y * d.y,
 									collected_mean3d[j + BLOCK_SIZE * 2] + camera_plane2.x * d.x + camera_plane2.y * d.y};
-				if constexpr (DEPTH)
-				{
-					float t_center = collected_ts[j];
-					float2 ray_plane = collected_ray_planes[j];
-					float t = t_center + (ray_plane.x * d.x + ray_plane.y * d.y);
-					// float depth = t/ln;
-					Depth += t * aT;
-					if (before_median) mDepth = t;
-				}
 				for(int ch = 0; ch < 3; ch++)
 					Coord[ch] += coord[ch] * aT;
-				{
-					Normal[0] += collected_normals[j].x * aT;
-					Normal[1] += collected_normals[j].y * aT;
-					Normal[2] += collected_normals[j].z * aT;
-				}
-
 				if (before_median){
 					for(int ch = 0; ch < 3; ch++)
 						mCoord[ch] = coord[ch];
-					max_contributor = contributor;
 				}
-				
-				// const float mapped_max_t = (FAR_PLANE * depth - FAR_PLANE * NEAR_PLANE) / ((FAR_PLANE - NEAR_PLANE) * depth);
-
-				// // fork from 
-				// float A = 1-T;
-				// const float mapped_max_tt = mapped_max_t * mapped_max_t;
-				// float error = mapped_max_tt * A + dist2 - 2 * mapped_max_t * dist1;
-				// depth_distortion += error * aT;
-				
-				// dist1 += mapped_max_t * aT;
-				// dist2 += mapped_max_tt * aT;
+			}
+			if constexpr (DEPTH)
+			{
+				float t_center = collected_ts[j];
+				float2 ray_plane = collected_ray_planes[j];
+				float t = t_center + (ray_plane.x * d.x + ray_plane.y * d.y);
+				// float depth = t/ln;
+				Depth += t * aT;
+				if (before_median) mDepth = t;
 			}
 
+			if constexpr (NORMAL)
+			{
+				Normal[0] += collected_normals[j].x * aT;
+				Normal[1] += collected_normals[j].y * aT;
+				Normal[2] += collected_normals[j].z * aT;
+			}
+			
+			if constexpr (GEO)
+			{
+				if (before_median)
+					max_contributor = contributor;
+			}
+
+			
 			weight += aT;
 			T = test_T;
 
@@ -649,45 +635,59 @@ renderCUDA(
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		out_alpha[pix_id] = weight; //1 - T;
-		if constexpr (GEO)
+
+		if constexpr (COORD)
 		{
-			float len_normal;
 			if(last_contributor)
 			{
 				for (int ch = 0; ch < 3; ch++)
+				{
 					out_coord[ch * H * W + pix_id] = Coord[ch] / weight;
-				// out_distortion[pix_id] = depth_distortion / (weight * weight);
-				len_normal = sqrt(Normal[0]*Normal[0]+Normal[1]*Normal[1]+Normal[2]*Normal[2]);
+				}
 			}
 			else
 			{
 				for (int ch = 0; ch < 3; ch++)
 					out_coord[ch * H * W + pix_id] = 0;
-				// out_distortion[pix_id] = 0;
-				len_normal = 1;
 			}
 			for (int ch = 0; ch < 3; ch++)
 			{
 				accum_coord[ch * H * W + pix_id] = Coord[ch];
 				out_mcoord[ch * H * W + pix_id] = mCoord[ch];
 			}
-			normal_length[pix_id] = len_normal;
-			len_normal = max(len_normal, NORMALIZE_EPS);
-			for (int ch = 0; ch < 3; ch++)
-				out_normal[ch * H * W + pix_id] = Normal[ch]/len_normal;
-			if constexpr (DEPTH)
-			{
-				float depth_ln = Depth/ln;
-				accum_depth[pix_id] = depth_ln;
-				if(last_contributor)
-					out_depth[pix_id] = depth_ln/weight;
-				else
-					out_depth[pix_id] = 0;
-				out_mdepth[pix_id] = mDepth/ln;
-			}
+		}
 
-			// out_wd[pix_id] = dist1;
-			// out_wd2[pix_id] = dist2; // Opacity is detached from depth distortion loss. So this variable is useless
+		if constexpr (DEPTH)
+		{
+			float depth_ln = Depth/ln;
+			accum_depth[pix_id] = depth_ln;
+			if(last_contributor)
+			{
+				out_depth[pix_id] = depth_ln/weight;
+			}
+			else
+			{
+				out_depth[pix_id] = 0;
+			}
+			out_mdepth[pix_id] = mDepth/ln;
+		}
+
+		if constexpr (NORMAL)
+		{
+			if(last_contributor)
+			{
+				float len_normal = sqrt(Normal[0]*Normal[0]+Normal[1]*Normal[1]+Normal[2]*Normal[2]);
+				normal_length[pix_id] = len_normal;
+				len_normal = max(len_normal, NORMALIZE_EPS);
+				for (int ch = 0; ch < 3; ch++)
+					out_normal[ch * H * W + pix_id] = Normal[ch]/len_normal;
+			}
+			else
+			{
+				normal_length[pix_id] = 1;
+				for (int ch = 0; ch < 3; ch++)
+					out_normal[ch * H * W + pix_id] = 0;
+			}
 		}
 	}
 }
@@ -716,28 +716,27 @@ void FORWARD::render(
 	float* out_normal,
 	float* out_depth,
 	float* out_mdepth,
-	float* out_distortion,
-	float* out_wd,
-	float* out_wd2,
 	float* accum_coord,
 	float* accum_depth,
 	float* normal_length,
-	bool geo,
-	bool depth)
+	bool require_coord,
+	bool require_depth)
 {
-#define RENDER_CUDA_CALL(template_geo, template_depth) \
-renderCUDA<NUM_CHANNELS, template_geo, template_depth> <<<grid, block>>> ( \
+#define RENDER_CUDA_CALL(template_coord, template_depth, template_normal) \
+renderCUDA<NUM_CHANNELS, template_coord, template_depth, template_normal> <<<grid, block>>> ( \
 	ranges, point_list, W, H, view_points, means2D, colors, ts, camera_planes, ray_planes, \
 	normals, conic_opacity, focal_x, focal_y, out_alpha, n_contrib, bg_color, out_color, \
-	out_coord, out_mcoord, out_normal, out_depth, out_mdepth, out_distortion, out_wd, out_wd2, \
+	out_coord, out_mcoord, out_normal, out_depth, out_mdepth, \
 	accum_coord, accum_depth, normal_length)
 
-	if (geo && depth)
-		RENDER_CUDA_CALL(true, true);
-	else if (geo && !depth)
-		RENDER_CUDA_CALL(true, false);
+	if (require_coord && require_depth)
+		RENDER_CUDA_CALL(true, true, true);
+	else if (require_coord && !require_depth)
+		RENDER_CUDA_CALL(true, false, true);
+	else if(!require_coord && require_depth)
+		RENDER_CUDA_CALL(false, true, true);
 	else
-		RENDER_CUDA_CALL(false, false);
+		RENDER_CUDA_CALL(false, false, false);
 		
 #undef RENDER_CUDA_CALL
 }
@@ -1325,21 +1324,6 @@ integrateCUDA(
 						}
 						
 					}
-					// printf("%f %f %f %f %f %f\t",collected_invraycov[6*j+0], collected_invraycov[6*j+1], collected_invraycov[6*j+2],collected_invraycov[6*j+3], collected_invraycov[6*j+4],collected_invraycov[6*j+5]);
-					// if(projected_depth[k]<depth)
-					// {
-					// 	glm::vec3 delta_u = glm::vec3(d.x, d.y, depth_center-projected_depth[k]);
-					// 	power = -0.5f * (glm::dot(delta_u, invraycov*delta_u));
-					// }
-					// else{
-					// 	float vv = collected_invraycov[6*j+5];
-					// 	glm::vec3 delta_u = -glm::vec3(d.x, d.y, depth_center);
-					// 	float oo = glm::dot(delta_u, invraycov*delta_u);
-					// 	float vo = glm::dot(invraycov[2],delta_u);
-					// 	power = -0.5f * (oo-vo*vo/vv);
-					// }
-					
-					// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 
 
 					// TODO check here

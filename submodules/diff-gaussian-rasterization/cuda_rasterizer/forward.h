@@ -17,7 +17,6 @@
 #include "device_launch_parameters.h"
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
-#include <glm/gtx/pca.hpp>
 
 namespace FORWARD
 {
@@ -81,14 +80,11 @@ namespace FORWARD
 		float* out_normal,
 		float* out_depth,
 		float* out_mdepth,
-		float* out_distortion,
-		float* out_wd,
-		float* out_wd2,
 		float* accum_coord,
 		float* accum_depth,
 		float* normal_length,
-		bool geo,
-		bool depth);
+		bool require_coord,
+		bool require_depth);
 
 	//follow code is adopted from GOF for marching tetrahedra https://github.com/autonomousvision/gaussian-opacity-fields
 	// Perform initial steps for each Point prior to integration.

@@ -56,9 +56,8 @@ namespace CudaRasterizer
 			float* out_mdepth,
 			float* out_alpha,
 			float* out_normal,
-			float* out_distortion,
 			int* radii = nullptr,
-			bool geo_reg = true,
+			bool require_coord = true,
 			bool require_depth = true,
 			bool debug = false
 			);
@@ -92,7 +91,6 @@ namespace CudaRasterizer
 			const float* dL_dpix_mdepth,
 			const float* dL_dalphas,
 			const float* dL_dpixel_normals,
-			const float* dL_ddistortions,
 			float* dL_dmean2D,
 			float* dL_dview_points,
 			float* dL_dconic,
@@ -107,7 +105,7 @@ namespace CudaRasterizer
 			float* dL_dsh,
 			float* dL_dscale,
 			float* dL_drot,
-			bool geo_reg = true,
+			bool require_coord = true,
 			bool require_depth = true,
 			bool debug = false);
 		

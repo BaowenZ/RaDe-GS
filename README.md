@@ -109,9 +109,9 @@ We build this project based on [Gaussian Splatting](https://github.com/graphdeco
 
 We incorporate the filters proposed in [Mip-Splatting](https://github.com/autonomousvision/mip-splatting).
 
-We adopt the loss functions of [2D GS](https://github.com/hbb1/2d-gaussian-splatting) and use the preprocessed DTU dataset.
+We incorporate the loss functions of [2D GS](https://github.com/hbb1/2d-gaussian-splatting) and use the preprocessed DTU dataset.
 
-We adopt the densification strategy, evalution and decoupled appearance modeling form [GOF](https://github.com/autonomousvision/gaussian-opacity-fields/tree/main)  and use the preprocessed TNT dataset.
+We incorporate the densification strategy, evalution and decoupled appearance modeling form [GOF](https://github.com/autonomousvision/gaussian-opacity-fields/tree/main)  and use the preprocessed TNT dataset.
 
 The evaluation scripts for the DTU and Tanks and Temples datasets are sourced from [DTUeval-python](https://github.com/jzhangbs/DTUeval-python) and [TanksAndTemples](https://github.com/isl-org/TanksAndTemples/tree/master/python_toolbox/evaluation), respectively.
 

@@ -65,8 +65,6 @@ namespace CudaRasterizer
 	{
 		uint2* ranges;
 		uint2* point_ranges;
-		float* wd;
-		float* wd2;
 		float* accum_coord;
 		float* accum_depth;
 		uint32_t* n_contrib;

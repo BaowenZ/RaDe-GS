@@ -228,8 +228,6 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	obtain(chunk, img.n_contrib, N * 2, 128);
 	obtain(chunk, img.ranges, N, 128);
 	obtain(chunk, img.point_ranges, N, 128);
-	obtain(chunk, img.wd, N, 128);
-	obtain(chunk, img.wd2, N, 128);
 	obtain(chunk, img.accum_coord, N * 3, 128);
 	obtain(chunk, img.accum_depth, N, 128);
 	obtain(chunk, img.normal_length, N, 128);
@@ -281,9 +279,8 @@ int CudaRasterizer::Rasterizer::forward(
 	float* out_mdepth,
 	float* out_alpha,
 	float* out_normal,
-	float* out_distortion,
 	int* radii,
-	bool geo_reg,
+	bool require_coord,
 	bool require_depth,
 	bool debug
 	)
@@ -418,13 +415,10 @@ int CudaRasterizer::Rasterizer::forward(
 		out_normal,
 		out_depth,
 		out_mdepth,
-		out_distortion,
-		imgState.wd,
-		imgState.wd2,
 		imgState.accum_coord,
 		imgState.accum_depth,
 		imgState.normal_length,
-		geo_reg,
+		require_coord,
 		require_depth), debug);
 
 	return num_rendered;
@@ -461,7 +455,6 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* dL_dpix_mdepth,
 	const float* dL_dalphas,
 	const float* dL_dpixel_normals,
-	const float* dL_ddistortions,
 	float* dL_dmean2D,
 	float* dL_dview_points,
 	float* dL_dconic,
@@ -476,7 +469,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
-	bool geo_reg,
+	bool require_coord,
 	bool require_depth,
 	bool debug)
 {
@@ -516,8 +509,6 @@ void CudaRasterizer::Rasterizer::backward(
 		geomState.ray_planes,
 		alphas,
 		geomState.normals,
-		imgState.wd,
-		imgState.wd2,
 		imgState.accum_coord,
 		imgState.accum_depth,
 		imgState.normal_length,
@@ -529,7 +520,6 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dpix_mdepth,
 		dL_dalphas,
 		dL_dpixel_normals,
-		dL_ddistortions,
 		normalmap,
 		focal_x, focal_y,
 		(float3*)dL_dview_points,
@@ -541,7 +531,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dcamera_planes,
 		(float2*)dL_dray_planes,
 		dL_dnormals,
-		geo_reg,
+		require_coord,
 		require_depth), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance

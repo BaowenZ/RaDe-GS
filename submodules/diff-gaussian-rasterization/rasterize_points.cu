@@ -32,7 +32,7 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     return lambda;
 }
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -53,7 +53,7 @@ RasterizeGaussiansCUDA(
 	const int degree,
 	const torch::Tensor& campos,
 	const bool prefiltered,
-	const bool geo_reg,
+	const bool require_coord,
 	const bool require_depth,
 	const bool debug)
 {
@@ -75,7 +75,6 @@ RasterizeGaussiansCUDA(
   torch::Tensor out_mcoord = torch::full({3, H, W}, 0.0, float_opts);
   torch::Tensor out_alpha = torch::full({1, H, W}, 0.0, float_opts);
   torch::Tensor out_normal = torch::full({3, H, W}, 0.0, float_opts);
-  torch::Tensor out_distortion = torch::full({1, H, W}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
   
   torch::Device device(torch::kCUDA);
@@ -125,13 +124,12 @@ RasterizeGaussiansCUDA(
 		out_mdepth.contiguous().data<float>(),
 		out_alpha.contiguous().data<float>(),
 		out_normal.contiguous().data<float>(),
-		out_distortion.contiguous().data<float>(),
 		radii.contiguous().data<int>(),
-		geo_reg,
+		require_coord,
 		require_depth,
 		debug);
   }
-  return std::make_tuple(rendered, out_color, out_coord, out_mcoord, out_alpha, out_normal, out_depth, out_mdepth, out_distortion, radii, geomBuffer, binningBuffer, imgBuffer);
+  return std::make_tuple(rendered, out_color, out_coord, out_mcoord, out_alpha, out_normal, out_depth, out_mdepth, radii, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -156,7 +154,6 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& dL_dout_mdepth,
 	const torch::Tensor& dL_dout_alpha,
 	const torch::Tensor& dL_dout_normal,
-	const torch::Tensor& dL_dout_distortion,
 	const torch::Tensor& normalmap,
 	const torch::Tensor& sh,
 	const int degree,
@@ -166,7 +163,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
 	const torch::Tensor& alphas,
-	const bool geo_reg,
+	const bool require_coord,
 	const bool require_depth,
 	const bool debug) 
 {
@@ -226,7 +223,6 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  dL_dout_mdepth.contiguous().data<float>(),
 	  dL_dout_alpha.contiguous().data<float>(),
 	  dL_dout_normal.contiguous().data<float>(),
-	  dL_dout_distortion.contiguous().data<float>(),
 	  dL_dmeans2D.contiguous().data<float>(),
 	  dL_dview_points.contiguous().data<float>(),
 	  dL_dconic.contiguous().data<float>(),  
@@ -241,7 +237,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  dL_dsh.contiguous().data<float>(),
 	  dL_dscales.contiguous().data<float>(),
 	  dL_drotations.contiguous().data<float>(),
-	  geo_reg,
+	  require_coord,
 	  require_depth,
 	  debug);
   }

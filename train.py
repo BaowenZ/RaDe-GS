@@ -82,7 +82,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     viewpoint_stack = None
     ema_loss_for_log, ema_depth_loss_for_log, ema_mask_loss_for_log, ema_normal_loss_for_log = 0.0, 0.0, 0.0, 0.0
+
     require_depth = not dataset.use_coord_map
+    require_coord = dataset.use_coord_map
+    
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     for iteration in range(first_iter, opt.iterations + 1):        
@@ -120,7 +123,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         reg_kick_on = iteration >= opt.regularization_from_iter
         
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, geo_reg=reg_kick_on, require_depth = require_depth)
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, require_coord = require_coord and reg_kick_on, require_depth = require_depth and reg_kick_on)
         rendered_image: torch.Tensor
         rendered_image, viewspace_point_tensor, visibility_filter, radii = (
                                                                     render_pkg["render"], 
@@ -128,7 +131,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                                                                     render_pkg["visibility_filter"], 
                                                                     render_pkg["radii"])
         gt_image = viewpoint_cam.original_image.cuda()
-        
+
         if dataset.use_decoupled_appearance:
             Ll1_render = L1_loss_appearance(rendered_image, gt_image, gaussians, viewpoint_cam.uid)
         else:
@@ -186,7 +189,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    # gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.05, scene.cameras_extent, size_threshold)
                     if dataset.disable_filter3D:
                         gaussians.reset_3D_filter()
@@ -261,7 +263,7 @@ def training_report(tb_writer, iteration, Ll1, loss, normal_loss, l1_loss, elaps
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
                 psnr_test /= len(config['cameras'])
-                l1_test /= len(config['cameras'])          
+                l1_test /= len(config['cameras'])
                 print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
                 if config["name"] == "test":
                     with open(scene.model_path + "/chkpnt" + str(iteration) + ".txt", "w") as file_object:

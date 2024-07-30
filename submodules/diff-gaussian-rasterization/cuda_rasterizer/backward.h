@@ -17,7 +17,6 @@
 #include "device_launch_parameters.h"
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
-#include <glm/gtx/pca.hpp>
 
 namespace BACKWARD
 {
@@ -37,8 +36,6 @@ namespace BACKWARD
 		const float2* ray_planes,
 		const float* alphas,
 		const float3* normals,
-		const float* wd_map,
-		const float* wd2_map,
 		const float* accum_coord,
 		const float* accum_depth,
 		const float* normal_length,
@@ -50,7 +47,6 @@ namespace BACKWARD
 		const float* dL_dpixel_mdepth,
 		const float* dL_dalphas,
 		const float* dL_dpixel_normals,
-		const float* dL_ddistortions,
 		const float* normalmap,
 		const float focal_x, 
 		const float focal_y,
@@ -63,8 +59,8 @@ namespace BACKWARD
 		float* dL_dcamera_planes,
 		float2* dL_dray_planes,
 		float* dL_dnormals,
-		bool geo,
-		bool depth);
+		bool require_coord,
+		bool require_depth);
 
 	void preprocess(
 		int P, int D, int M,
