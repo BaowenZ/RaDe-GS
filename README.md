@@ -85,9 +85,9 @@ python evaluate_dtu_mesh.py -s <path to DTU dataset> -m <output folder>
 ## TNT Dataset
 ```
 # training
-python train.py -s <path to preprocessed TNT dataset> -m <output folder> -r 2 --use_decoupled_appearance
+python train.py -s <path to preprocessed TNT dataset> -m <output folder> -r 2 --eval --use_decoupled_appearance
 # mesh extraction
-python mesh_extract_tetrahedra.py -s <path to preprocessed TNT dataset> -m <output folder> -r 2
+python mesh_extract_tetrahedra.py -s <path to preprocessed TNT dataset> -m <output folder> -r 2 --eval
 # evaluation
 python eval_tnt/run.py --dataset-dir <path to GT TNT dataset> --traj-path <path to preprocessed TNT COLMAP_SfM.log file> --ply-path <output folder>/recon.ply
 ```
