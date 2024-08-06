@@ -259,8 +259,6 @@ __global__ void computeCov2DCUDA(int P,
 	float l;
 	float nl;
 	glm::mat3 dL_dnJ;
-	float lv, lv2, lv3;
-	float tmp;
 	if(isnan(uvh_mn.x)||D==0)
 	{
 		dL_dVrk = glm::mat3(0,0,0,0,0,0,0,0,0);
@@ -271,8 +269,6 @@ __global__ void computeCov2DCUDA(int P,
 		dL_du = 0;
 		dL_dv = 0;
 		dL_dl = 0;
-		lv =  lv2 = lv3 = 1;
-		tmp = 0;
 	}
 	else
 	{
@@ -307,14 +303,7 @@ __global__ void computeCov2DCUDA(int P,
 
 		glm::vec3 cam_normal_vector = nJ * ray_normal_vector;
 		glm::vec3 normal_vector = glm::normalize(cam_normal_vector);
-		lv2 = (cam_normal_vector.x*cam_normal_vector.x+\
-				cam_normal_vector.y*cam_normal_vector.y+\
-				cam_normal_vector.z*cam_normal_vector.z);
-		lv = sqrt(lv2);
-		lv3 = lv2 * lv;
-		glm::mat3 eye3 = glm::mat3(1,0,0,
-									0,1,0,
-									0,0,1);
+		float lv = glm::length(cam_normal_vector);
 		const glm::vec3 dL_dnormal_lv = dL_dnormal/lv;
 		glm::vec3 dL_dcam_normal_vector = dL_dnormal_lv - normal_vector * glm::dot(normal_vector,dL_dnormal_lv);
 		glm::vec3 dL_dray_normal_vector = glm::transpose(nJ) * dL_dcam_normal_vector;
@@ -334,10 +323,10 @@ __global__ void computeCov2DCUDA(int P,
 						-dL_camera_plane1.x * camera_plane1.x - dL_camera_plane1.y * camera_plane1.y
 						-dL_camera_plane2.x * camera_plane2.x - dL_camera_plane2.y * camera_plane2.y
 						-dL_dray_normal_vector[0] * ray_normal_vector.x - dL_dray_normal_vector[1] * ray_normal_vector.y
-						-dL_dray_plane.x*ray_plane.x - dL_dray_plane.y*ray_plane.y) / nl;
+						-dL_dray_plane.x * ray_plane.x - dL_dray_plane.y * ray_plane.y) / nl;
 
 
-		tmp = dL_dplane.x * plane.x + dL_dplane.y * plane.y;
+		float tmp = dL_dplane.x * plane.x + dL_dplane.y * plane.y;
 
 		glm::vec3 W_uvh = W * uvh;
 
@@ -467,18 +456,23 @@ __global__ void computeCov2DCUDA(int P,
 	float tz2 = tz * tz;
 	float tz3 = tz2 * tz;
 
+	// glm::mat3 nJ = glm::mat3(
+	// 		1 / t.z, 0.0f, -(t.x) / (t.z * t.z),
+	// 		0.0f, 1 / t.z, -(t.y) / (t.z * t.z),
+	// 		t.x/l, t.y/l, t.z/l);
+	float l3 = l * l * l;
 	float dL_dtx = x_grad_mul * (-h_x * tz2 * dL_dJ02 + dL_du * tz
-								-dL_dnJ[0][2]*tz2 + dL_dnJ[2][0]*(1/lv-t.x*t.x/lv3) + dL_dnJ[2][2]*(-t.x*t.z/lv3) //this line is from normal
+								-dL_dnJ[0][2]*tz2 + dL_dnJ[2][0]*(1/l-t.x*t.x/l3) + dL_dnJ[2][1]*(-t.x*t.y/l3) + dL_dnJ[2][2]*(-t.x*t.z/l3) //this line is from normal
 								+(dL_camera_plane0.x * plane[0] + dL_camera_plane0.y * plane[1] + dL_camera_plane2.x)/nl
 								+dL_dl*t.x/l);
 	float dL_dty = y_grad_mul * (-h_y * tz2 * dL_dJ12 + dL_dv * tz
-								-dL_dnJ[1][2]*tz2 + dL_dnJ[2][1]*(1/lv-t.y*t.y/lv3) + dL_dnJ[2][2]*(-t.y*t.z/lv3) //this line is from normal
+								-dL_dnJ[1][2]*tz2 + dL_dnJ[2][0]*(-t.x*t.y/l3) + dL_dnJ[2][1]*(1/l-t.y*t.y/l3) + dL_dnJ[2][2]*(-t.y*t.z/l3) //this line is from normal
 								+(dL_camera_plane1.x * plane[0] + dL_camera_plane1.y * plane[1] + dL_camera_plane2.y)/nl
 								+dL_dl*t.y/l);
 	float dL_dtz = -h_x * tz2 * dL_dJ00 - h_y * tz2 * dL_dJ11 + (2 * h_x * t.x) * tz3 * dL_dJ02 + (2 * h_y * t.y) * tz3 * dL_dJ12
-					- (dL_du * t.x + dL_dv * t.y) * tz2 + tmp * tz
-					+ dL_dnJ[0][0] * (-tz2) + dL_dnJ[1][1] * (-tz2) + dL_dnJ[0][2] * (2*t.x*tz3) + dL_dnJ[1][2] * (2*t.y*tz3) // two lines are from normal
-					+ (dL_dnJ[2][0]*t.x+dL_dnJ[2][1]*t.y)*(-t.z/lv3) + dL_dnJ[2][2]*(1/lv-t.z*t.z/lv3) // two lines are from normal
+					- (dL_du * t.x + dL_dv * t.y) * tz2
+					+ (dL_dnJ[0][0] + dL_dnJ[1][1]) * (-tz2) + dL_dnJ[0][2] * (2*t.x*tz3) + dL_dnJ[1][2] * (2*t.y*tz3) // two lines are from normal
+					+ (dL_dnJ[2][0]*t.x+dL_dnJ[2][1]*t.y)*(-t.z/l3) + dL_dnJ[2][2]*(1/l-t.z*t.z/l3) // two lines are from normal
 					+ (dL_camera_plane0.x * (-(v2 + 1)) + dL_camera_plane0.y * uv + dL_camera_plane1.x * uv + dL_camera_plane1.y * (-(u2+1)) + dL_camera_plane2.x * plane[0] + dL_camera_plane2.y * plane[1])/nl
 					+ dL_dl*t.z/l;
 
