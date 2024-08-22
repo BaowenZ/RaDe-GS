@@ -113,9 +113,9 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 	glm::mat3 cov = glm::transpose(T) * glm::transpose(Vrk) * T;
 
 	// output[0] = { float(cov[0][0]), float(cov[0][1]), float(cov[1][1]) };
-	cov2D[0] = float(cov[0][0]);
+	cov2D[0] = float(cov[0][0] + kernel_size);
 	cov2D[1] = float(cov[0][1]);
-	cov2D[2] = float(cov[1][1]);
+	cov2D[2] = float(cov[1][1] + kernel_size);
 	const float det_0 = max(1e-6, cov[0][0] * cov[1][1] - cov[0][1] * cov[0][1]);
 	const float det_1 = max(1e-6, (cov[0][0] + kernel_size) * (cov[1][1] + kernel_size) - cov[0][1] * cov[0][1]);
 	coef = sqrt(det_0 / (det_1+1e-6) + 1e-6);
