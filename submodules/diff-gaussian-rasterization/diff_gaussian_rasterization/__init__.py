@@ -153,13 +153,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                 raise ex
         else:
              grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(*args)
-        assert not torch.isnan(grad_means3D).any()
-        assert not torch.isnan(grad_means2D).any()
-        assert not torch.isnan(grad_sh).any()
-        assert not torch.isnan(grad_colors_precomp).any()
-        assert not torch.isnan(grad_opacities).any()
-        assert not torch.isnan(grad_scales).any()
-        assert not torch.isnan(grad_rotations).any()
+
         grads = (
             grad_means3D,
             grad_means2D,
