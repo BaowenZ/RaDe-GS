@@ -40,7 +40,7 @@ pip install submodules/diff-gaussian-rasterization
 pip install submodules/simple-knn/
 
 # tetra-nerf for Marching Tetrahedra
-cd submodules/tetra-triangulation
+cd submodules/tetra_triangulation
 conda install cmake
 conda install conda-forge::gmp
 conda install conda-forge::cgal
